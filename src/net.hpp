@@ -27,6 +27,8 @@ void set_speed_limit(uint64_t bytes_per_sec);
 bool get(const std::string& url, std::string& out, std::string& err, Session* s = nullptr);
 bool fetch(const std::string& url, const std::string& path, Progress* p, std::string& err, Session* s = nullptr);
 bool stream(const std::string& url, const Sink& sink, Progress* p, std::string& err);
+// GET или HEAD (head=true, тело не качается), опционально с Authorization: Bearer
+bool request(const std::string& url, const std::string& bearer, bool head, std::string& out, std::string& err);
 bool get_range(const std::string& url, const std::string& range, std::string& out, std::string& err);
 
 }

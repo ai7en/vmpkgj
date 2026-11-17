@@ -6,18 +6,28 @@
 #include <vector>
 
 namespace col {
-constexpr unsigned BG = RGBA8(14, 12, 24, 255);
-constexpr unsigned SURFACE = RGBA8(27, 24, 42, 255);
-constexpr unsigned SURFACE2 = RGBA8(41, 36, 62, 255);
-constexpr unsigned LINE = RGBA8(56, 50, 82, 255);
-constexpr unsigned TEXT = RGBA8(244, 242, 252, 255);
-constexpr unsigned MUTED = RGBA8(150, 144, 176, 255);
-constexpr unsigned ACCENT = RGBA8(139, 92, 246, 255);
-constexpr unsigned ACCENT2 = RGBA8(244, 114, 182, 255);
-constexpr unsigned ACCENT_DIM = RGBA8(139, 92, 246, 60);
-constexpr unsigned GREEN = RGBA8(52, 211, 153, 255);
-constexpr unsigned ORANGE = RGBA8(251, 170, 80, 255);
-constexpr unsigned RED = RGBA8(248, 113, 113, 255);
+// Цвета темы. Меняются в рантайме через apply_theme().
+inline unsigned BG = RGBA8(14, 12, 24, 255);
+inline unsigned SURFACE = RGBA8(27, 24, 42, 255);
+inline unsigned SURFACE2 = RGBA8(41, 36, 62, 255);
+inline unsigned LINE = RGBA8(56, 50, 82, 255);
+inline unsigned TEXT = RGBA8(244, 242, 252, 255);
+inline unsigned MUTED = RGBA8(150, 144, 176, 255);
+inline unsigned ACCENT = RGBA8(139, 92, 246, 255);
+inline unsigned ACCENT2 = RGBA8(244, 114, 182, 255);
+inline unsigned ACCENT_DIM = RGBA8(139, 92, 246, 60);
+inline unsigned GREEN = RGBA8(52, 211, 153, 255);
+inline unsigned ORANGE = RGBA8(251, 170, 80, 255);
+inline unsigned RED = RGBA8(248, 113, 113, 255);
+// Текст поверх картинок и тёмных градиентов: всегда светлый
+inline unsigned ON_IMG = RGBA8(244, 242, 252, 255);
+inline unsigned ON_IMG_MUTED = RGBA8(214, 210, 232, 255);
+// Цвет текста на залитых акцентом кнопках
+inline unsigned ON_ACCENT = RGBA8(255, 255, 255, 255);
+
+enum Theme { THEME_CLASSIC = 0, THEME_PS20_LIGHT = 1, THEME_PS30_DARK = 2, THEME_COUNT = 3 };
+const char* theme_name(int t);
+void apply_theme(int t);
 }
 
 enum Btn { BTN_CROSS, BTN_CIRCLE, BTN_TRIANGLE, BTN_SQUARE, BTN_L, BTN_R, BTN_START, BTN_SELECT };

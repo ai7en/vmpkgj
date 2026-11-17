@@ -258,6 +258,47 @@ static void release(CURL* h, Session* s)
         curl_easy_cleanup(h);
 }
 
+bool request(const std::string& url, const std::string& bearer, bool head, std::string& out, std::string& err)
+{
+    bool plain = false;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        Ctx ctx;
+        ctx.plain = plain;
+        out.clear();
+        ctx.sink = [&](const uint8_t* d, size_t n) {
+            out.append((const char*)d, n);
+            return out.size() < 4u * 1024 * 1024;
+        };
+        CURL* h = make(url, ctx);
+        curl_slist* hl = nullptr;
+        if (!bearer.empty()) {
+            std::string a = "Authorization: Bearer " + bearer;
+            hl = curl_slist_append(hl, a.c_str());
+            curl_easy_setopt(h, CURLOPT_HTTPHEADER, hl);
+        }
+        if (head)
+            curl_easy_setopt(h, CURLOPT_NOBODY, 1L);
+        CURLcode rc = curl_easy_perform(h);
+        if (hl)
+            curl_slist_free_all(hl);
+        if (rc != CURLE_OK && tls_refused(rc) && !plain && starts_with(url, "https://")) {
+            release(h, nullptr);
+            plain = true;
+            attempt--;
+            continue;
+        }
+        if (rc != CURLE_OK) {
+            err = curl_err(h, rc);
+            release(h, nullptr);
+            return false;
+        }
+        release(h, nullptr);
+        return true;
+    }
+    err = "request";
+    return false;
+}
+
 bool get_range(const std::string& url, const std::string& range, std::string& out, std::string& err)
 {
     if (is_drive(url)) {

@@ -33,6 +33,7 @@ add_executable(vpkgj
   src/net.cpp
   src/pkg.cpp
   src/promote.cpp
+  src/scraper.cpp
   src/shaccg.cpp
   src/tasks.cpp
   src/util.cpp

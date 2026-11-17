@@ -166,6 +166,63 @@ void fini()
     fonts.clear();
 }
 
+namespace col {
+const char* theme_name(int t)
+{
+    static const char* n[] = {"Классика", "Светлая · PlayStation 20th", "Тёмная · PlayStation 30th"};
+    return n[t >= 0 && t < THEME_COUNT ? t : 0];
+}
+
+void apply_theme(int t)
+{
+    if (t == THEME_PS20_LIGHT) {
+        // Светлая: серый корпус PS 1994 года (20th Anniversary) и четыре цвета символов
+        BG = RGBA8(222, 223, 228, 255);
+        SURFACE = RGBA8(242, 243, 246, 255);
+        SURFACE2 = RGBA8(205, 207, 216, 255);
+        LINE = RGBA8(176, 179, 192, 255);
+        TEXT = RGBA8(24, 28, 40, 255);
+        MUTED = RGBA8(92, 98, 116, 255);
+        ACCENT = RGBA8(0, 92, 184, 255);       // синий PlayStation
+        ACCENT2 = RGBA8(214, 40, 80, 255);     // красный круг
+        ACCENT_DIM = RGBA8(0, 92, 184, 50);
+        GREEN = RGBA8(0, 140, 90, 255);        // зелёный треугольник
+        ORANGE = RGBA8(200, 110, 0, 255);
+        RED = RGBA8(200, 36, 36, 255);
+        ON_ACCENT = RGBA8(255, 255, 255, 255);
+    } else if (t == THEME_PS30_DARK) {
+        // Тёмная: чёрный глянец и холодный металлик (30th Anniversary), синий и золото
+        BG = RGBA8(8, 9, 12, 255);
+        SURFACE = RGBA8(20, 22, 28, 255);
+        SURFACE2 = RGBA8(36, 40, 50, 255);
+        LINE = RGBA8(62, 68, 82, 255);
+        TEXT = RGBA8(236, 239, 246, 255);
+        MUTED = RGBA8(146, 154, 172, 255);
+        ACCENT = RGBA8(44, 132, 232, 255);
+        ACCENT2 = RGBA8(226, 184, 92, 255);
+        ACCENT_DIM = RGBA8(44, 132, 232, 60);
+        GREEN = RGBA8(52, 211, 153, 255);
+        ORANGE = RGBA8(251, 170, 80, 255);
+        RED = RGBA8(248, 113, 113, 255);
+        ON_ACCENT = RGBA8(255, 255, 255, 255);
+    } else {
+        BG = RGBA8(14, 12, 24, 255);
+        SURFACE = RGBA8(27, 24, 42, 255);
+        SURFACE2 = RGBA8(41, 36, 62, 255);
+        LINE = RGBA8(56, 50, 82, 255);
+        TEXT = RGBA8(244, 242, 252, 255);
+        MUTED = RGBA8(150, 144, 176, 255);
+        ACCENT = RGBA8(139, 92, 246, 255);
+        ACCENT2 = RGBA8(244, 114, 182, 255);
+        ACCENT_DIM = RGBA8(139, 92, 246, 60);
+        GREEN = RGBA8(52, 211, 153, 255);
+        ORANGE = RGBA8(251, 170, 80, 255);
+        RED = RGBA8(248, 113, 113, 255);
+        ON_ACCENT = RGBA8(255, 255, 255, 255);
+    }
+}
+}
+
 static float font_scale = 1.5f;
 
 void set_font_scale(float s)

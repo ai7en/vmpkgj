@@ -7,6 +7,7 @@
 #include "net.hpp"
 #include "pkg.hpp"
 #include "promote.hpp"
+#include "scraper.hpp"
 #include "tasks.hpp"
 #include "shaccg.hpp"
 #include "util.hpp"
@@ -66,7 +67,7 @@ static const int TAB_DOWNLOADS = CAT_COUNT + 1;
 static const int TAB_COUNT = CAT_COUNT + 2;
 
 enum Screen { SCR_BROWSE, SCR_DETAIL, SCR_SETTINGS, SCR_BACKUPS, SCR_PRELOAD };
-enum ImePurpose { IME_NONE, IME_SEARCH, IME_REPO, IME_BRANCH, IME_GAMES, IME_DLCS };
+enum ImePurpose { IME_NONE, IME_SEARCH, IME_REPO, IME_BRANCH, IME_GAMES, IME_DLCS, IME_SGDB };
 
 struct Hit {
     float x, y, w, h;
@@ -182,8 +183,12 @@ struct App {
     std::vector<std::function<void()>> settings_actions;
     int speed_mode = 0;
     bool skip_data = false;  // ставить порты/хоумбрю без data
-    bool scraper = true;     // добирать обложки и скриншоты скрапером
+    bool scrape_on = true;     // добирать обложки и скриншоты скрапером
     int font_mode = 3;       // индекс в FONT_SCALES (по умолчанию 1.5)
+    int theme = 0;           // col::Theme
+    std::string sgdb_key;    // ключ API SteamGridDB (из настроек)
+    void scrape_hint(const Entry& e, bool manual = false);
+    void apply_scraped();
     void load_prefs();
     void save_prefs();
     void apply_speed();
@@ -1114,6 +1119,7 @@ void App::move_sel(int dx, int dy)
 void App::open_detail(const Entry& e)
 {
     detail = e;
+    scrape_hint(e);
     rel_sel = -1;
     viewer = false;
     has_saves = !e.id.empty() && fs::exists(savedata_path(e.id));
@@ -1381,6 +1387,13 @@ void App::ime_done(const std::string& text)
             start_refresh(true);
         }
         break;
+    case IME_SGDB:
+        sgdb_key = trim(text);
+        scraper::set_key(sgdb_key);
+        save_prefs();
+        scraper::clear_misses();
+        show_toast(sgdb_key.empty() ? "Ключ SteamGridDB удалён" : "Ключ SteamGridDB сохранён");
+        break;
     case IME_GAMES:
     case IME_DLCS:
         (ime_purpose == IME_GAMES ? settings.games_url : settings.dlcs_url) = trim(text);
@@ -1596,6 +1609,10 @@ void App::input()
     if (screen == SCR_DETAIL) {
         int n = (int)detail.shots.size();
         int rn = (int)related.size();
+        if ((pressed & SCE_CTRL_SELECT) && !n) {
+            scrape_hint(detail, true);
+            show_toast(scrape_on ? "Ищу обложку и скриншоты" : "Скрапер выключен в настройках");
+        }
         if ((pressed & SCE_CTRL_SELECT) && n) {
             viewer = true;
             shot_auto = now_ms() + 600000;
@@ -1757,11 +1774,11 @@ void App::draw_header()
         bool on = t == tab;
         if (on)
             gfx::rrect(x, 16, w, 34, 17, col::ACCENT);
-        gfx::text(on ? gfx::bold : gfx::regular, x + 11, 38, 15, on ? col::TEXT : col::MUTED, label);
+        gfx::text(on ? gfx::bold : gfx::regular, x + 11, 38, 15, on ? col::ON_ACCENT : col::MUTED, label);
         if (n) {
             std::string c = std::to_string(n);
-            gfx::circle(x + w - 22, 33, 9, on ? col::TEXT : col::ACCENT);
-            gfx::text_center(gfx::bold, x + w - 22, 37, 11, on ? col::ACCENT : col::TEXT, c);
+            gfx::circle(x + w - 22, 33, 9, on ? col::ON_ACCENT : col::ACCENT);
+            gfx::text_center(gfx::bold, x + w - 22, 37, 11, on ? col::ACCENT : col::ON_ACCENT, c);
         }
         int tt = t;
         hits.push_back({x, 10, w, 46, [this, tt]() {
@@ -1910,6 +1927,7 @@ void App::draw_grid()
     for (int r = pre_from; r <= pre_to; r++)
         for (int k = r * COLS; k < (r + 1) * COLS && k < (int)f.size(); k++) {
             const Entry& e = catalog.items[tab][f[k]];
+            scrape_hint(e);
             if (!e.shots.empty())
                 images.prefetch(catalog.media_url(e.shots[0]), IMG_THUMB);
             images.prefetch(icon_url(e), IMG_THUMB);
@@ -2076,7 +2094,7 @@ void App::draw_detail()
         if (!related.empty() && rel_sel < 0)
             gfx::rframe(bx - 3, by - 3, bw + 6, 56, 28, 2, col::TEXT);
         gfx::button(ok_icon, bx + 18, by + 15, 20);
-        gfx::text_center(gfx::bold, bx + bw / 2 + 12, by + 31, 16, st == ST_UPDATE ? col::BG : col::TEXT, label);
+        gfx::text_center(gfx::bold, bx + bw / 2 + 12, by + 31, 16, st == ST_INSTALLED && !launchable(e) ? col::TEXT : col::ON_ACCENT, label);
     }
     hits.push_back({bx, by, bw, 50, [this]() { primary_action(); }});
 
@@ -2142,7 +2160,7 @@ void App::draw_detail()
         float y = top + 16 + i * lh - desc_scroll;
         if (y < top - lh || y > bottom + lh)
             continue;
-        gfx::text(gfx::regular, 32, y, 15, RGBA8(214, 210, 232, 255), desc_lines[i]);
+        gfx::text(gfx::regular, 32, y, 15, gfx::alpha(col::TEXT, 0.88f), desc_lines[i]);
     }
     vita2d_disable_clipping();
     if (maxs > 0) {
@@ -2261,6 +2279,56 @@ void App::toggle_daemon()
 static const char* SPEED_NAMES[] = {"Без ограничения", "4 МБ/с", "2 МБ/с", "1 МБ/с", "512 КБ/с"};
 static const uint64_t SPEED_VALUES[] = {0, 4ull << 20, 2ull << 20, 1ull << 20, 512ull << 10};
 
+// Одноразово подтягивает список установленного и config.txt из оригинала (ux0:data/VPKGJ), если у форка своих ещё нет.
+// Оригинал не трогаем, только читаем.
+static void migrate_from_original()
+{
+    fs::mkdirs(APP_DIR);
+    static const char* files[] = {"installed.txt", "config.txt"};
+    for (const char* f : files) {
+        std::string dst = APP_DIR + "/" + f, src = std::string("ux0:data/VPKGJ/") + f, data;
+        if (fs::exists(dst) || !fs::exists(src))
+            continue;
+        if (fs::read(src, data) && !data.empty())
+            fs::write(dst, data);
+    }
+}
+
+void App::scrape_hint(const Entry& e, bool manual)
+{
+    if (!scrape_on || e.name.empty() || (!e.icon.empty() && !e.shots.empty()))
+        return;
+    scraper::Request r;
+    r.cat = (int)e.cat;
+    r.id = e.id.empty() ? e.name : e.id;
+    r.name = e.name;
+    r.region = e.region;
+    r.games = e.cat == CAT_GAMES && !e.dlc;
+    r.manual = manual;
+    scraper::enqueue(r);
+}
+
+void App::apply_scraped()
+{
+    scraper::Result r;
+    for (int n = 0; n < 8 && scraper::poll(r); n++) {
+        auto fill = [&](Entry& e) {
+            if (e.icon.empty() && !r.icon.empty())
+                e.icon = r.icon;
+            if (e.shots.empty() && !r.shots.empty())
+                e.shots = r.shots;
+        };
+        if (r.cat >= 0 && r.cat < CAT_COUNT)
+            for (auto& e : catalog.items[r.cat])
+                if ((e.id.empty() ? e.name : e.id) == r.id) {
+                    fill(e);
+                    break;
+                }
+        if (screen == SCR_DETAIL && (int)detail.cat == r.cat && (detail.id.empty() ? detail.name : detail.id) == r.id)
+            fill(detail);
+    }
+}
+
 static std::string font_label(int mode);
 static const float FONT_SCALES[] = {1.0f, 1.25f, 1.4f, 1.5f, 1.75f};
 static const int FONT_SCALE_COUNT = 5;
@@ -2278,13 +2346,25 @@ void App::load_prefs()
             skip_data = v != 0;
         p = strstr(s.c_str(), "scraper=");
         if (p && sscanf(p, "scraper=%d", &v) == 1)
-            scraper = v != 0;
+            scrape_on = v != 0;
+        p = strstr(s.c_str(), "theme=");
+        if (p && sscanf(p, "theme=%d", &v) == 1 && v >= 0 && v < col::THEME_COUNT)
+            theme = v;
+        p = strstr(s.c_str(), "sgdb=");
+        if (p) {
+            std::string k = p + 5;
+            k = k.substr(0, k.find('\n'));
+            sgdb_key = trim(k);
+        }
         p = strstr(s.c_str(), "font=");
         if (p && sscanf(p, "font=%d", &v) == 1 && v >= 0 && v < FONT_SCALE_COUNT)
             font_mode = v;
     }
     gfx::set_font_scale(FONT_SCALES[font_mode]);
-    catalog_set_scraper(scraper);
+    catalog_set_scraper(scrape_on);
+    col::apply_theme(theme);
+    scraper::set_key(sgdb_key);
+    scraper::set_enabled(scrape_on);
 }
 
 static std::string font_label(int mode)
@@ -2302,7 +2382,7 @@ static std::string font_label(int mode)
 void App::save_prefs()
 {
     fs::write(APP_DIR + "/prefs.txt", "speed=" + std::to_string(speed_mode) + "\nnodata=" + std::to_string(skip_data ? 1 : 0) +
-                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scraper ? 1 : 0) + "\n");
+                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\ntheme=" + std::to_string(theme) + "\nsgdb=" + sgdb_key + "\n");
 }
 
 void App::apply_speed()
@@ -3248,6 +3328,11 @@ void App::draw_settings()
              save_prefs();
              apply_speed();
          }},
+        {"Тема", col::theme_name(theme), col::ACCENT, [this]() {
+             theme = (theme + 1) % col::THEME_COUNT;
+             col::apply_theme(theme);
+             save_prefs();
+         }},
         {"Размер шрифта", "‹ x" + font_label(font_mode) + " ›", font_mode == 3 ? col::MUTED : col::ACCENT, [this]() {
              font_mode = (font_mode + 1) % FONT_SCALE_COUNT;
              gfx::set_font_scale(FONT_SCALES[font_mode]);
@@ -3258,11 +3343,26 @@ void App::draw_settings()
              save_prefs();
              show_toast(skip_data ? "Data ставиться не будет, только vpk" : "Data снова ставится вместе с vpk");
          }},
-        {"Скрапер обложек", scraper ? "вкл" : "выкл", scraper ? col::ACCENT : col::MUTED, [this]() {
-             scraper = !scraper;
-             catalog_set_scraper(scraper);
+        {"Скрапер обложек", scrape_on ? "вкл" : "выкл", scrape_on ? col::ACCENT : col::MUTED, [this]() {
+             scrape_on = !scrape_on;
+             catalog_set_scraper(scrape_on);
+             scraper::set_enabled(scrape_on);
              save_prefs();
-             show_toast("Применится после обновления каталога");
+             show_toast(scrape_on ? "Скрапер включён" : "Скрапер выключен");
+         }},
+        {"Ключ SteamGridDB", sgdb_key.empty() ? "не задан (нужен для хоумбрю)" : "задан", sgdb_key.empty() ? col::MUTED : col::ACCENT, [this]() {
+             ime_purpose = IME_SGDB;
+             ime::open("API-ключ SteamGridDB (steamgriddb.com/profile/preferences/api)", sgdb_key, 80);
+         }},
+        {"Найти все пропущенные обложки", scraper::pending() ? "ищу, в очереди " + std::to_string(scraper::pending()) : "запустить", scraper::pending() ? col::ORANGE : col::MUTED, [this]() {
+             int n = 0;
+             for (int c = 0; c < CAT_COUNT; c++)
+                 for (auto& e : catalog.items[c])
+                     if ((e.icon.empty() || e.shots.empty()) && !e.name.empty()) {
+                         scrape_hint(e, true);
+                         n++;
+                     }
+             show_toast(n ? "В поиск добавлено: " + std::to_string(n) : "Все обложки уже есть");
          }},
         {"Фоновая служба", !daemon_enabled() ? "выключена" : daemon_alive() ? "работает" : "не отвечает, починить", !daemon_enabled() ? col::MUTED : daemon_alive() ? col::GREEN : col::ORANGE, [this]() {
              if (daemon_enabled() && !daemon_alive())
@@ -3552,6 +3652,8 @@ void App::draw_footer()
         x = gfx::hint(x, y, back_icon, "Назад");
         if (!detail.shots.empty())
             x = gfx::hint(x, y, BTN_SELECT, "Скриншоты");
+        else if (scrape_on)
+            x = gfx::hint(x, y, BTN_SELECT, "Найти обложку");
         if (!related.empty())
             gfx::text(gfx::regular, x, y + 15, 14, col::MUTED, "↓ связанное");
         else if (detail.shots.size() > 1)
@@ -3586,7 +3688,7 @@ void App::draw_modal()
     float bw = gfx::width(gfx::bold, 15, modal.yes) + 64;
     gfx::rrect(x + w - 28 - bw, by, bw, 36, 18, col::ACCENT);
     gfx::button(ok_icon, x + w - 28 - bw + 12, by + 8, 20);
-    gfx::text(gfx::bold, x + w - 28 - bw + 42, by + 23, 15, col::TEXT, modal.yes);
+    gfx::text(gfx::bold, x + w - 28 - bw + 42, by + 23, 15, col::ON_ACCENT, modal.yes);
     hits.push_back({x + w - 28 - bw, by, bw, 36, [this]() {
                         modal.on = false;
                         if (modal.action) {
@@ -3685,6 +3787,7 @@ void App::run()
         ok_icon = BTN_CIRCLE;
         back_icon = BTN_CROSS;
     }
+    migrate_from_original();
     settings.load();
     load_prefs();
     installed.load();
@@ -3736,6 +3839,7 @@ void App::run()
         }
     }
     images.start();
+    scraper::start();
     images.set_media(catalog.media);
     if (pre_checked) {
         std::string mark;
@@ -3778,6 +3882,7 @@ void App::run()
         vita2d_common_dialog_update();
         vita2d_swap_buffers();
         images.tick();
+        apply_scraped();
     }
 }
 
