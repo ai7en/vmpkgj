@@ -18,11 +18,11 @@
 static void dlog(const char* fmt, ...);
 #include <stdarg.h>
 
-#define DIR "ux0:data/VPKGJ"
+#define DIR "ux0:data/VPKGJ2"
 #define CHUNK (32 * 1024)
 #define QUEUE_MAX (16 * 1024)
 #define NET_SIZE (141 * 1024)
-#define APP_ID "VPKG00001"
+#define APP_ID "VPKG00002"
 #define TLS_POOL (96 * 1024)
 
 const int sceKernelPreloadModuleInhibit = SCE_KERNEL_PRELOAD_INHIBIT_LIBDBG;

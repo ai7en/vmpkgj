@@ -76,6 +76,7 @@ public:
     bool parse(const std::string& json, std::string& err);
     void load_pkgj();
     void apply_covers();
+    void apply_scraper();
     void load_updates();
     void prepare();
     const Entry* patch_for(const Entry& e) const;
@@ -106,6 +107,7 @@ private:
 };
 
 bool plugin_present(const Entry& plugin);
+void catalog_set_scraper(bool on);
 std::string pkgj_config_path();
 bool pkgj_urls(std::string& games, std::string& dlcs);
 void pkgj_fetch(bool force);

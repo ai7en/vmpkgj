@@ -39,6 +39,9 @@ void hgrad(float x, float y, float w, float h, unsigned left, unsigned right);
 void line(float x0, float y0, float x1, float y1, float t, unsigned c);
 void circle(float x, float y, float r, unsigned c);
 
+// Глобальный множитель размера шрифта (по умолчанию 1.5)
+void set_font_scale(float s);
+float get_font_scale();
 void text(Font f, float x, float y, int size, unsigned c, const std::string& s);
 void text_right(Font f, float x, float y, int size, unsigned c, const std::string& s);
 void text_center(Font f, float x, float y, int size, unsigned c, const std::string& s);

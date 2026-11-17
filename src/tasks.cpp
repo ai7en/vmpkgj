@@ -20,7 +20,7 @@
 #include <set>
 #include <sstream>
 
-static const std::string TEMP = "ux0:temp/vpkgj";
+static const std::string TEMP = "ux0:temp/vpkgj2";
 
 std::string Task::get_stage()
 {
@@ -788,7 +788,7 @@ static bool install_translation(Task& t, const std::string& file, std::string& e
 static bool self_update(Task& t, const std::string& file, bool staged, std::string& err)
 {
     t.set_stage(staged ? "Подготовка обновления" : "Обновление VPKGJ");
-    std::string dir = staged ? APP_DIR + "/update" : "ux0:app/VPKG00001";
+    std::string dir = staged ? APP_DIR + "/update" : "ux0:app/VPKG00002";
     if (staged) {
         fs::rmtree(dir);
         sceIoRemove((APP_DIR + "/update.ready").c_str());

@@ -13,7 +13,7 @@
 #include <cstring>
 #include <mutex>
 
-const std::string APP_DIR = "ux0:data/VPKGJ";
+const std::string APP_DIR = "ux0:data/VPKGJ2";
 
 __attribute__((used)) extern const char elf_segment_gap_pad[3072] = {1};
 

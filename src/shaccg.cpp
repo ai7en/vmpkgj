@@ -15,8 +15,8 @@ const char* PSM_ID = "PCSI00011";
 
 static const char* LIB = "ur0:data/libshacccg.suprx";
 static const char* LIB_EXT = "ur0:data/external/libshacccg.suprx";
-static const std::string USER_PRX = "ux0:data/vpkgj_psm.suprx";
-static const std::string KERNEL_PRX = "ux0:data/vpkgj_psm.skprx";
+static const std::string USER_PRX = "ux0:data/vpkgj2_psm.suprx";
+static const std::string KERNEL_PRX = "ux0:data/vpkgj2_psm.skprx";
 static const std::string HEADER = "*SHARKF00D\n" + USER_PRX + "\n*NPXS10031\n" + USER_PRX + "\n";
 
 static bool lib_file(const char* p)

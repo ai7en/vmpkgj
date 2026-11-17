@@ -166,6 +166,24 @@ void fini()
     fonts.clear();
 }
 
+static float font_scale = 1.5f;
+
+void set_font_scale(float s)
+{
+    font_scale = s < 0.5f ? 0.5f : (s > 3.0f ? 3.0f : s);
+}
+
+float get_font_scale()
+{
+    return font_scale;
+}
+
+static int scaled(int size)
+{
+    int v = (int)(size * font_scale + 0.5f);
+    return v < 6 ? 6 : v;
+}
+
 static vita2d_font* get(Font f, int size)
 {
     int key = f * 1000 + size;
@@ -428,15 +446,18 @@ void circle(float x, float y, float r, unsigned c)
 
 void text(Font f, float x, float y, int size, unsigned c, const std::string& s)
 {
-    vita2d_font* v = get(f, size);
+    int sz = scaled(size);
+    vita2d_font* v = get(f, sz);
+    // y задан как базовая линия под исходный размер: сдвигаем вниз, чтобы увеличенный текст не уезжал вверх из своих плашек
     if (v && !s.empty())
-        vita2d_font_draw_text(v, (int)x, (int)y, c, size, s.c_str());
+        vita2d_font_draw_text(v, (int)x, (int)(y + (sz - size) * 0.3f), c, sz, s.c_str());
 }
 
 int width(Font f, int size, const std::string& s)
 {
-    vita2d_font* v = get(f, size);
-    return !v || s.empty() ? 0 : vita2d_font_text_width(v, size, s.c_str());
+    int sz = scaled(size);
+    vita2d_font* v = get(f, sz);
+    return !v || s.empty() ? 0 : vita2d_font_text_width(v, sz, s.c_str());
 }
 
 void text_right(Font f, float x, float y, int size, unsigned c, const std::string& s)

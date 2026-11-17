@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <sstream>
 
@@ -352,6 +353,91 @@ void Catalog::apply_covers()
         if (e.lang.empty())
             e.lang = str(v, "l");
     }
+}
+
+static bool scraper_on = true;
+
+void catalog_set_scraper(bool on)
+{
+    scraper_on = on;
+}
+
+static std::string fill_id(std::string tpl, const std::string& id)
+{
+    size_t p;
+    while ((p = tpl.find("{id}")) != std::string::npos)
+        tpl.replace(p, 4, id);
+    return tpl;
+}
+
+// "https://github.com/owner/repo/..." -> "owner/repo"
+static std::string github_repo(const std::string& url)
+{
+    static const char* pre = "github.com/";
+    size_t p = url.find(pre);
+    if (p == std::string::npos)
+        return "";
+    std::string rest = url.substr(p + strlen(pre));
+    size_t a = rest.find('/');
+    if (a == std::string::npos || a == 0)
+        return "";
+    size_t b = rest.find('/', a + 1);
+    std::string repo = rest.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
+    if (repo.empty() || repo.find('?') != std::string::npos)
+        return "";
+    return rest.substr(0, a) + "/" + repo;
+}
+
+// Скрапер: добирает обложки и скриншоты там, где каталог их не дал.
+// Источники по порядку:
+//  1. уже стоящие на консоли игры: ur0:appmeta/<id>/icon0.png и фон LiveArea из ux0:app/<id>
+//  2. порты, хоумбрю и плагины с GitHub-ссылкой: sce_sys/icon0.png из репозитория проекта
+//  3. свои шаблоны из config.txt: scrape_icon / scrape_shot, в них {id} заменяется на titleid
+// Сюда только подставляются адреса, сами картинки грузит Images лениво, как и обычные обложки.
+void Catalog::apply_scraper()
+{
+    if (!scraper_on)
+        return;
+    std::string cfg, icon_tpl, shot_tpl;
+    fs::read(APP_DIR + "/config.txt", cfg);
+    std::istringstream in(cfg);
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (starts_with(line, "scrape_icon "))
+            icon_tpl = trim(line.substr(12));
+        else if (starts_with(line, "scrape_shot "))
+            shot_tpl = trim(line.substr(12));
+    }
+    for (int c = 0; c < CAT_COUNT; c++)
+        for (auto& e : items[c]) {
+            if (!e.icon.empty() && !e.shots.empty())
+                continue;
+            if (c == CAT_GAMES && !e.dlc) {
+                if (e.icon.empty()) {
+                    std::string ic = "ur0:appmeta/" + e.id + "/icon0.png";
+                    if (fs::exists(ic))
+                        e.icon = ic;
+                }
+                if (e.shots.empty()) {
+                    std::string base = "ux0:app/" + e.id + "/sce_sys/livearea/contents/";
+                    if (fs::exists(base + "bg0.png"))
+                        e.shots.push_back(base + "bg0.png");
+                    else if (fs::exists(base + "bg.png"))
+                        e.shots.push_back(base + "bg.png");
+                }
+                if (e.icon.empty() && !icon_tpl.empty())
+                    e.icon = fill_id(icon_tpl, e.id);
+                if (e.shots.empty() && !shot_tpl.empty())
+                    e.shots.push_back(fill_id(shot_tpl, e.id));
+            } else if (c == CAT_PORTS || c == CAT_HOMEBREW || c == CAT_PLUGINS) {
+                if (e.icon.empty()) {
+                    std::string repo = github_repo(e.url);
+                    if (!repo.empty())
+                        e.icon = "https://raw.githubusercontent.com/" + repo + "/HEAD/sce_sys/icon0.png";
+                }
+            }
+        }
 }
 
 int version_cmp(const std::string& a, const std::string& b)

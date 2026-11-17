@@ -42,6 +42,8 @@
 #define VPKGJ_TG "t.me/lik1sa"
 #define VPKGJ_FOR "phc.lokilab.ru"
 #define APP_REPO "Risaro/vpkgj"
+// Форк стоит рядом с оригиналом и не обновляется от него. 1 = включить самообновление (поменяй APP_REPO на свой репозиторий).
+#define VPKGJ_SELF_UPDATE 0
 
 int _newlib_heap_size_user = 160 * 1024 * 1024;
 unsigned int sceUserMainThreadStackSize = 1 * 1024 * 1024;
@@ -123,6 +125,7 @@ struct App {
     void check_deps();
 
     int settings_sel = 0;
+    int settings_top = 0;
     int backup_sel = 0;
     std::vector<Backup> backups;
     void draw_backups();
@@ -177,6 +180,9 @@ struct App {
 
     std::vector<std::function<void()>> settings_actions;
     int speed_mode = 0;
+    bool skip_data = false;  // ставить порты/хоумбрю без data
+    bool scraper = true;     // добирать обложки и скриншоты скрапером
+    int font_mode = 3;       // индекс в FONT_SCALES (по умолчанию 1.5)
     void load_prefs();
     void save_prefs();
     void apply_speed();
@@ -943,8 +949,10 @@ int App::refresh_thread(unsigned int, void* arg)
         fs::write(APP_DIR + "/covers.json", covers);
     c->load_pkgj();
     c->apply_covers();
+    c->apply_scraper();
     c->load_updates();
     c->prepare();
+#if VPKGJ_SELF_UPDATE
     std::string relc;
     fs::read(APP_DIR + "/app_rel.txt", relc);
     uint64_t rel_at = strtoull(relc.c_str(), nullptr, 10);
@@ -991,6 +999,11 @@ int App::refresh_thread(unsigned int, void* arg)
             }
         }
     }
+#else
+    c->app_version.clear();
+    c->app_url.clear();
+    c->app_notes.clear();
+#endif
     {
         std::lock_guard<Mutex> lock(a->refresh_m);
         a->fresh = std::move(c);
@@ -1254,6 +1267,11 @@ void App::ask_install(const Entry& e, bool reinstall)
             need_shaccg = true;
     modal.yes = reinstall ? "Переустановить" : "Установить";
     Entry copy = e;
+    bool has_data = (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) && !e.data.empty() && !is_update_of(e);
+    if (has_data && skip_data) {
+        copy.data.clear();
+        modal.lines.push_back("Включено «без data»: поставится только vpk");
+    }
     modal.action = [this, copy, deps]() {
         tasks.add(copy, deps);
         show_toast("Добавлено в загрузки");
@@ -1262,6 +1280,16 @@ void App::ask_install(const Entry& e, bool reinstall)
         modal.lines.push_back("Без libshacccg.suprx порт вылетит, его можно поставить автоматически");
         modal.alt = "Сначала libshacccg";
         modal.alt_action = [this]() { shaccg_ask(); };
+    }
+    if (has_data && !skip_data && modal.alt.empty()) {
+        Entry nodata = e;
+        nodata.data.clear();
+        modal.lines.push_back("Можно поставить без data (только vpk), если она уже лежит на карте");
+        modal.alt = "Без data";
+        modal.alt_action = [this, nodata, deps]() {
+            tasks.add(nodata, deps);
+            show_toast("Добавлено в загрузки без data");
+        };
     }
     if (e.cat == CAT_GAMES && !e.dlc) {
         std::vector<Entry> trs;
@@ -2232,19 +2260,48 @@ void App::toggle_daemon()
 static const char* SPEED_NAMES[] = {"Без ограничения", "4 МБ/с", "2 МБ/с", "1 МБ/с", "512 КБ/с"};
 static const uint64_t SPEED_VALUES[] = {0, 4ull << 20, 2ull << 20, 1ull << 20, 512ull << 10};
 
+static std::string font_label(int mode);
+static const float FONT_SCALES[] = {1.0f, 1.25f, 1.4f, 1.5f, 1.75f};
+static const int FONT_SCALE_COUNT = 5;
+
 void App::load_prefs()
 {
     std::string s;
-    if (!fs::read(APP_DIR + "/prefs.txt", s))
-        return;
-    int v = 0;
-    if (sscanf(s.c_str(), "speed=%d", &v) == 1 && v >= 0 && v < 5)
-        speed_mode = v;
+    if (fs::read(APP_DIR + "/prefs.txt", s)) {
+        int v = 0;
+        const char* p = strstr(s.c_str(), "speed=");
+        if (p && sscanf(p, "speed=%d", &v) == 1 && v >= 0 && v < 5)
+            speed_mode = v;
+        p = strstr(s.c_str(), "nodata=");
+        if (p && sscanf(p, "nodata=%d", &v) == 1)
+            skip_data = v != 0;
+        p = strstr(s.c_str(), "scraper=");
+        if (p && sscanf(p, "scraper=%d", &v) == 1)
+            scraper = v != 0;
+        p = strstr(s.c_str(), "font=");
+        if (p && sscanf(p, "font=%d", &v) == 1 && v >= 0 && v < FONT_SCALE_COUNT)
+            font_mode = v;
+    }
+    gfx::set_font_scale(FONT_SCALES[font_mode]);
+    catalog_set_scraper(scraper);
+}
+
+static std::string font_label(int mode)
+{
+    char b[16];
+    snprintf(b, sizeof(b), "%.2f", FONT_SCALES[mode]);
+    std::string r = b;
+    while (!r.empty() && r.back() == '0')
+        r.pop_back();
+    if (!r.empty() && r.back() == '.')
+        r.pop_back();
+    return r;
 }
 
 void App::save_prefs()
 {
-    fs::write(APP_DIR + "/prefs.txt", "speed=" + std::to_string(speed_mode) + "\n");
+    fs::write(APP_DIR + "/prefs.txt", "speed=" + std::to_string(speed_mode) + "\nnodata=" + std::to_string(skip_data ? 1 : 0) +
+                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scraper ? 1 : 0) + "\n");
 }
 
 void App::apply_speed()
@@ -2444,7 +2501,7 @@ void App::daemon_repair(bool from_settings)
     }
     std::vector<std::string> fixes;
     if (!file_ok)
-        fixes.push_back(b.empty() ? "файл демона пропал из ux0:data/VPKGJ" : "файл демона повреждён");
+        fixes.push_back(b.empty() ? "файл демона пропал из ux0:data/VPKGJ2" : "файл демона повреждён");
     if (!cfg_ok)
         fixes.push_back("демона нет в " + active);
     if (fixes.empty())
@@ -2517,7 +2574,7 @@ void App::queue_background(const Entry& e)
             urls.push_back(first_link(part));
     } else {
         urls.push_back(first_link(e.url));
-        if ((e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) && !is_update_of(e))
+        if ((e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) && !is_update_of(e) && !skip_data)
             for (auto& part : split_by(e.data, ';')) {
                 std::string src = part;
                 size_t gt = src.find('>');
@@ -2567,6 +2624,9 @@ void App::cancel_background()
 
 bool App::app_update_available()
 {
+#if !VPKGJ_SELF_UPDATE
+    return false;
+#endif
     return !catalog.app_version.empty() && !catalog.app_url.empty() && version_cmp(VPKGJ_VERSION, catalog.app_version) < 0;
 }
 
@@ -2596,7 +2656,7 @@ void App::ask_app_update(bool manual)
     modal.action = [this]() {
         Entry e;
         e.cat = CAT_HOMEBREW;
-        e.id = "VPKG00001";
+        e.id = "VPKG00002";
         e.name = "VPKGJ " + catalog.app_version;
         e.version = catalog.app_version;
         e.url = catalog.app_url;
@@ -2855,7 +2915,7 @@ void App::check_reboot()
 void App::draw_backups()
 {
     gfx::text(gfx::bold, 32, 46, 24, col::TEXT, "Резервные копии");
-    gfx::text_right(gfx::regular, W - 32, 44, 14, col::MUTED, "ux0:data/VPKGJ/backups");
+    gfx::text_right(gfx::regular, W - 32, 44, 14, col::MUTED, "ux0:data/VPKGJ2/backups");
     if (backups.empty()) {
         gfx::text_center(gfx::bold, W / 2, 260, 20, col::TEXT, "Копий пока нет");
         gfx::text_center(gfx::regular, W / 2, 290, 15, col::MUTED, "Они появятся перед установкой плагинов и переводов");
@@ -3136,7 +3196,9 @@ void App::draw_settings()
         std::function<void()> fn;
     };
     bool upd = app_update_available();
+    (void)upd;
     std::vector<Row> rows = {
+#if VPKGJ_SELF_UPDATE
         {"Обновление VPKGJ", upd ? "есть " + catalog.app_version + ", поставить" : "у тебя " VPKGJ_VERSION, upd ? col::ORANGE : col::MUTED,
          [this, upd]() {
              if (upd)
@@ -3146,6 +3208,9 @@ void App::draw_settings()
                  show_toast("Проверяю обновления");
              }
          }},
+#else
+        {"Версия", VPKGJ_VERSION " (форк, обновление от оригинала выключено)", col::MUTED, [this]() { show_toast("Самообновление от оригинала отключено"); }},
+#endif
         {"Репозиторий каталога", settings.repo, col::MUTED, [this]() {
              ime_purpose = IME_REPO;
              ime::open("Репозиторий каталога (user/repo)", settings.repo, 100);
@@ -3164,7 +3229,7 @@ void App::draw_settings()
              modal.lines.push_back("Ссылки на tsv в формате pkgj, pkgj для этого не нужен.");
              modal.lines.push_back("Игры: " + (settings.games_url.empty() ? std::string("не задано") : settings.games_url));
              modal.lines.push_back("DLC: " + (settings.dlcs_url.empty() ? std::string("не задано") : settings.dlcs_url));
-             modal.lines.push_back("Можно вписать и в ux0:data/VPKGJ/config.txt: url_games, url_dlcs, url_updates");
+             modal.lines.push_back("Можно вписать и в ux0:data/VPKGJ2/config.txt: url_games, url_dlcs, url_updates");
              modal.yes = "Ссылка на игры";
              modal.action = [this]() {
                  ime_purpose = IME_GAMES;
@@ -3181,6 +3246,22 @@ void App::draw_settings()
              speed_mode = (speed_mode + 1) % 5;
              save_prefs();
              apply_speed();
+         }},
+        {"Размер шрифта", "‹ x" + font_label(font_mode) + " ›", font_mode == 3 ? col::MUTED : col::ACCENT, [this]() {
+             font_mode = (font_mode + 1) % FONT_SCALE_COUNT;
+             gfx::set_font_scale(FONT_SCALES[font_mode]);
+             save_prefs();
+         }},
+        {"Порты и хоумбрю без data", skip_data ? "вкл: ставится только vpk" : "выкл", skip_data ? col::ACCENT : col::MUTED, [this]() {
+             skip_data = !skip_data;
+             save_prefs();
+             show_toast(skip_data ? "Data ставиться не будет, только vpk" : "Data снова ставится вместе с vpk");
+         }},
+        {"Скрапер обложек", scraper ? "вкл" : "выкл", scraper ? col::ACCENT : col::MUTED, [this]() {
+             scraper = !scraper;
+             catalog_set_scraper(scraper);
+             save_prefs();
+             show_toast("Применится после обновления каталога");
          }},
         {"Фоновая служба", !daemon_enabled() ? "выключена" : daemon_alive() ? "работает" : "не отвечает, починить", !daemon_enabled() ? col::MUTED : daemon_alive() ? col::GREEN : col::ORANGE, [this]() {
              if (daemon_enabled() && !daemon_alive())
@@ -3200,31 +3281,40 @@ void App::draw_settings()
                  return;
              }
              fs::rmtree(APP_DIR + "/dl");
-             fs::rmtree("ux0:temp/vpkgj");
+             fs::rmtree("ux0:temp/vpkgj2");
              fs::mkdirs(APP_DIR + "/dl");
-             fs::mkdirs("ux0:temp/vpkgj");
+             fs::mkdirs("ux0:temp/vpkgj2");
              show_toast("Временные файлы удалены");
          }},
     };
     settings_actions.clear();
     if (settings_sel >= (int)rows.size())
         settings_sel = (int)rows.size() - 1;
-    float y = 68, rw = 600;
+    float rw = 600, pitch = 44, rh = 40;
+    int visible = std::max(1, (int)((FOOTER_Y - 68) / pitch));
+    if (settings_sel < settings_top)
+        settings_top = settings_sel;
+    if (settings_sel >= settings_top + visible)
+        settings_top = settings_sel - visible + 1;
+    settings_top = std::max(0, std::min(settings_top, std::max(0, (int)rows.size() - visible)));
+    float y = 68;
     for (int i = 0; i < (int)rows.size(); i++) {
-        bool on = i == settings_sel;
-        gfx::rrect(28, y, rw, 36, 12, on ? col::SURFACE2 : gfx::alpha(col::SURFACE, 0.9f));
-        if (on)
-            gfx::rframe(28, y, rw, 36, 12, 2, col::ACCENT);
-        gfx::text(on ? gfx::bold : gfx::regular, 46, y + 24, 15, col::TEXT, rows[i].title);
-        gfx::text_right(gfx::regular, 28 + rw - 18, y + 24, 14, rows[i].vc, gfx::ellipsize(gfx::regular, 14, rows[i].value, 300));
         settings_actions.push_back(rows[i].fn);
+        if (i < settings_top || i >= settings_top + visible)
+            continue;
+        bool on = i == settings_sel;
+        gfx::rrect(28, y, rw, rh, 12, on ? col::SURFACE2 : gfx::alpha(col::SURFACE, 0.9f));
+        if (on)
+            gfx::rframe(28, y, rw, rh, 12, 2, col::ACCENT);
+        gfx::text(on ? gfx::bold : gfx::regular, 46, y + 25, 15, col::TEXT, rows[i].title);
+        gfx::text_right(gfx::regular, 28 + rw - 18, y + 25, 14, rows[i].vc, gfx::ellipsize(gfx::regular, 14, rows[i].value, 230));
         int idx = i;
-        hits.push_back({28, y, rw, 36, [this, idx]() {
+        hits.push_back({28, y, rw, rh, [this, idx]() {
                             if (settings_sel == idx && idx < (int)settings_actions.size())
                                 settings_actions[idx]();
                             settings_sel = idx;
                         }});
-        y += 40;
+        y += pitch;
     }
     draw_about(68);
 }
@@ -3595,6 +3685,7 @@ void App::run()
         back_icon = BTN_CROSS;
     }
     settings.load();
+    load_prefs();
     installed.load();
     if (catalog.load_cache())
         loaded_once = true;
@@ -3604,6 +3695,7 @@ void App::run()
     catalog.pack_id = trim(catalog.pack_id);
     catalog.load_pkgj();
     catalog.apply_covers();
+    catalog.apply_scraper();
     catalog.load_updates();
     catalog.prepare();
     load_views();
@@ -3611,7 +3703,6 @@ void App::run()
         pre_checked = true;
         screen = SCR_BROWSE;
     }
-    load_prefs();
     apply_speed();
     rebuild();
     {

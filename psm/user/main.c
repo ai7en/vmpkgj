@@ -8,7 +8,7 @@ static tai_hook_ref_t printf_ref, remove_ref;
 static int printf_patched(const char* txt, ...)
 {
     if (strncmp(txt, "[%4s/%6s: %-26s] ***********************************************", 64) == 0)
-        sceAppMgrLaunchAppByName(0x60000, "VPKG00001", "");
+        sceAppMgrLaunchAppByName(0x60000, "VPKG00002", "");
     return 0;
 }
 
@@ -16,7 +16,7 @@ static int remove_patched(const char* name)
 {
     int r = TAI_CONTINUE(int, remove_ref, name);
     if (strncmp(name, "ux0:/ShaRKF00D/libshacccg.suprx", 31) == 0)
-        sceAppMgrLaunchAppByName(0x60000, "VPKG00001", "");
+        sceAppMgrLaunchAppByName(0x60000, "VPKG00002", "");
     return r;
 }
 
