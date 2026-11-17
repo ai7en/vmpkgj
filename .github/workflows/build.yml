@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install libs
-        run: vdpm libvita2d curl-mbedtls jsoncpp minizip libpng libjpeg-turbo freetype zlib taipool libk
+        run: yes | vdpm libvita2d curl-mbedtls jsoncpp minizip libpng libjpeg-turbo freetype zlib taipool libk
       - name: Build
         run: |
           cmake -S . -B build
