@@ -52,11 +52,12 @@ static const int W = 960;
 static const int H = 544;
 static const int HEADER_H = 64;
 static const int FOOTER_Y = 508;
-static const int COLS = 4;
-static const int CARD_W = 206;
-static const int CARD_IMG_H = 116;
-static const int CARD_H = 174;
-static const int GAP_X = 18;
+// карточки игр увеличены на 20% (206x116 -> 247x139); в 960 px влезает 3 колонки вместо 4
+static const int COLS = 3;
+static const int CARD_W = 247;
+static const int CARD_IMG_H = 139;
+static const int CARD_H = 197;
+static const int GAP_X = 28;
 static const int GAP_Y = 20;
 static const int GRID_X = (W - (COLS * CARD_W + (COLS - 1) * GAP_X)) / 2;
 static const int GRID_TOP = HEADER_H + 14;
@@ -1793,7 +1794,7 @@ void App::draw_card(const Entry& e, float x, float y)
         }
     } else if (icon) {
         gfx::placeholder_round(x, y, CARD_W, CARD_IMG_H, 14, e.name, 0);
-        gfx::fit_round(icon, x + CARD_W / 2 - 50, y + 6, 100, CARD_IMG_H - 12, 6, ia);
+        gfx::fit_round(icon, x + CARD_W / 2 - 60, y + 7, 120, CARD_IMG_H - 14, 6, ia);
     } else {
         gfx::placeholder_round(x, y, CARD_W, CARD_IMG_H, 14, e.name, 34);
     }
