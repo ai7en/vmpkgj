@@ -10,6 +10,7 @@
 #include "datascan.hpp"
 #include "scraper.hpp"
 #include "tasks.hpp"
+#include "vitaforge.hpp"
 #include "shaccg.hpp"
 #include "util.hpp"
 
@@ -187,6 +188,7 @@ struct App {
     bool scrape_on = true;     // добирать обложки и скриншоты скрапером
     int font_mode = 3;       // индекс в FONT_SCALES (по умолчанию 1.5)
     int theme = 0;           // col::Theme
+    bool vforge_cat = false; // каталог VitaForge в хоумбрю/портах
     bool use_vforge = true;  // VitaForge как источник обложек
     bool pre_bg = false;     // предзагрузка обложек идёт в фоне
     void draw_pre_pill();
@@ -958,7 +960,13 @@ int App::refresh_thread(unsigned int, void* arg)
     std::string covers;
     if ((a->manual_refresh || !fs::exists(APP_DIR + "/covers.json") || (ok && !same)) && net::get(base + "covers.json", covers, err) && covers.size() > 2 && covers[0] == '{')
         fs::write(APP_DIR + "/covers.json", covers);
+    if (vitaforge::enabled()) {
+        std::string vferr;
+        if (!vitaforge::refresh(a->manual_refresh, vferr))
+            log_line("%s", vferr.c_str());
+    }
     c->load_pkgj();
+    c->load_vitaforge();
     c->apply_covers();
     c->apply_scraper();
     c->load_updates();
@@ -2384,6 +2392,9 @@ void App::load_prefs()
         p = strstr(s.c_str(), "theme=");
         if (p && sscanf(p, "theme=%d", &v) == 1 && v >= 0 && v < col::THEME_COUNT)
             theme = v;
+        p = strstr(s.c_str(), "vfcat=");
+        if (p && sscanf(p, "vfcat=%d", &v) == 1)
+            vforge_cat = v != 0;
         p = strstr(s.c_str(), "vforge=");
         if (p && sscanf(p, "vforge=%d", &v) == 1)
             use_vforge = v != 0;
@@ -2403,6 +2414,7 @@ void App::load_prefs()
     scraper::set_key(sgdb_key);
     scraper::set_enabled(scrape_on);
     scraper::set_vitaforge(use_vforge);
+    vitaforge::set_enabled(vforge_cat);
 }
 
 static std::string font_label(int mode)
@@ -2420,7 +2432,7 @@ static std::string font_label(int mode)
 void App::save_prefs()
 {
     fs::write(APP_DIR + "/prefs.txt", "speed=" + std::to_string(speed_mode) + "\nnodata=" + std::to_string(skip_data ? 1 : 0) +
-                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\ntheme=" + std::to_string(theme) + "\nvforge=" + std::to_string(use_vforge ? 1 : 0) + "\nsgdb=" + sgdb_key + "\n");
+                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\ntheme=" + std::to_string(theme) + "\nvfcat=" + std::to_string(vforge_cat ? 1 : 0) + "\nvforge=" + std::to_string(use_vforge ? 1 : 0) + "\nsgdb=" + sgdb_key + "\n");
 }
 
 void App::apply_speed()
@@ -3393,6 +3405,13 @@ void App::draw_settings()
              save_prefs();
              show_toast(scrape_on ? "Скрапер включён" : "Скрапер выключен");
          }},
+        {"Каталог VitaForge", vforge_cat ? "вкл: хоумбрю и порты" : "выкл", vforge_cat ? col::ACCENT : col::MUTED, [this]() {
+             vforge_cat = !vforge_cat;
+             vitaforge::set_enabled(vforge_cat);
+             save_prefs();
+             show_toast(vforge_cat ? "Загружаю каталог VitaForge" : "Каталог VitaForge выключен");
+             start_refresh(true);
+         }},
         {"Источник VitaForge", use_vforge ? "вкл: обложки по title ID" : "выкл", use_vforge ? col::ACCENT : col::MUTED, [this]() {
              use_vforge = !use_vforge;
              scraper::set_vitaforge(use_vforge);
@@ -3901,6 +3920,7 @@ void App::run()
     fs::read(APP_DIR + "/pack.txt", catalog.pack_id);
     catalog.pack_id = trim(catalog.pack_id);
     catalog.load_pkgj();
+    catalog.load_vitaforge();
     catalog.apply_covers();
     catalog.apply_scraper();
     catalog.load_updates();

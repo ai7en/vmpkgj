@@ -77,6 +77,7 @@ public:
     void load_pkgj();
     void apply_covers();
     void apply_scraper();
+    void load_vitaforge();
     void load_updates();
     void prepare();
     const Entry* patch_for(const Entry& e) const;

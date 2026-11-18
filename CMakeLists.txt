@@ -38,6 +38,7 @@ add_executable(vpkgj
   src/shaccg.cpp
   src/tasks.cpp
   src/util.cpp
+  src/vitaforge.cpp
   src/zip.cpp
 )
 

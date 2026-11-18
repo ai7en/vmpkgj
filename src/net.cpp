@@ -258,7 +258,7 @@ static void release(CURL* h, Session* s)
         curl_easy_cleanup(h);
 }
 
-bool request(const std::string& url, const std::string& bearer, bool head, std::string& out, std::string& err)
+bool request(const std::string& url, const std::string& bearer, bool head, std::string& out, std::string& err, const std::string& header, size_t max_bytes)
 {
     bool plain = false;
     for (int attempt = 0; attempt < 2; attempt++) {
@@ -267,15 +267,18 @@ bool request(const std::string& url, const std::string& bearer, bool head, std::
         out.clear();
         ctx.sink = [&](const uint8_t* d, size_t n) {
             out.append((const char*)d, n);
-            return out.size() < 4u * 1024 * 1024;
+            return out.size() < max_bytes;
         };
         CURL* h = make(url, ctx);
         curl_slist* hl = nullptr;
+        if (!header.empty())
+            hl = curl_slist_append(hl, header.c_str());
         if (!bearer.empty()) {
             std::string a = "Authorization: Bearer " + bearer;
             hl = curl_slist_append(hl, a.c_str());
-            curl_easy_setopt(h, CURLOPT_HTTPHEADER, hl);
         }
+        if (hl)
+            curl_easy_setopt(h, CURLOPT_HTTPHEADER, hl);
         if (head)
             curl_easy_setopt(h, CURLOPT_NOBODY, 1L);
         CURLcode rc = curl_easy_perform(h);

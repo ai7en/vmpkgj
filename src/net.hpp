@@ -28,7 +28,7 @@ bool get(const std::string& url, std::string& out, std::string& err, Session* s 
 bool fetch(const std::string& url, const std::string& path, Progress* p, std::string& err, Session* s = nullptr);
 bool stream(const std::string& url, const Sink& sink, Progress* p, std::string& err);
 // GET или HEAD (head=true, тело не качается), опционально с Authorization: Bearer
-bool request(const std::string& url, const std::string& bearer, bool head, std::string& out, std::string& err);
+bool request(const std::string& url, const std::string& bearer, bool head, std::string& out, std::string& err, const std::string& header = "", size_t max_bytes = 4u * 1024 * 1024);
 bool get_range(const std::string& url, const std::string& range, std::string& out, std::string& err);
 
 }
