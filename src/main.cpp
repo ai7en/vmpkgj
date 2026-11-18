@@ -7,6 +7,7 @@
 #include "net.hpp"
 #include "pkg.hpp"
 #include "promote.hpp"
+#include "datascan.hpp"
 #include "scraper.hpp"
 #include "tasks.hpp"
 #include "shaccg.hpp"
@@ -186,6 +187,10 @@ struct App {
     bool scrape_on = true;     // добирать обложки и скриншоты скрапером
     int font_mode = 3;       // индекс в FONT_SCALES (по умолчанию 1.5)
     int theme = 0;           // col::Theme
+    bool use_vforge = true;  // VitaForge как источник обложек
+    bool pre_bg = false;     // предзагрузка обложек идёт в фоне
+    void draw_pre_pill();
+    void pre_bg_tick();
     std::string sgdb_key;    // ключ API SteamGridDB (из настроек)
     void scrape_hint(const Entry& e, bool manual = false);
     void apply_scraped();
@@ -1852,6 +1857,25 @@ void App::draw_card(const Entry& e, float x, float y)
         }
     }
 
+    if (e.cat == CAT_GAMES || e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) {
+        datascan::Info di;
+        if (datascan::lookup(e.id, e.data_path, di)) {
+            float cx = x + CARD_W - 8;
+            if (di.has_repatch) {
+                int w = gfx::width(gfx::bold, 11, "rePatch") + 14;
+                cx -= w;
+                gfx::rrect(cx, y + CARD_IMG_H - 28, w, 20, 10, col::ACCENT2);
+                gfx::text(gfx::bold, cx + 7, y + CARD_IMG_H - 14, 11, col::ON_ACCENT, "rePatch");
+                cx -= 4;
+            }
+            if (di.has_data) {
+                int w = gfx::width(gfx::bold, 11, "data") + 14;
+                cx -= w;
+                gfx::rrect(cx, y + CARD_IMG_H - 28, w, 20, 10, col::ACCENT);
+                gfx::text(gfx::bold, cx + 7, y + CARD_IMG_H - 14, 11, col::ON_ACCENT, "data");
+            }
+        }
+    }
     gfx::text(gfx::bold, x + 12, y + CARD_IMG_H + 26, 15, col::TEXT, gfx::ellipsize(gfx::bold, 15, e.name, CARD_W - 24));
     std::string sub;
     if (e.cat == CAT_GAMES)
@@ -1958,8 +1982,9 @@ void App::draw_grid()
     if (!fs_.empty()) {
         int w = gfx::width(gfx::regular, 13, fs_) + 24;
         gfx::rrect(24, FOOTER_Y - 34, w, 26, 13, gfx::alpha(col::ACCENT, 0.9f));
-        gfx::text(gfx::regular, 36, FOOTER_Y - 16, 13, col::TEXT, fs_);
+        gfx::text(gfx::regular, 36, FOOTER_Y - 16, 13, col::ON_ACCENT, fs_);
     }
+    draw_pre_pill();
     if (!query.empty()) {
         std::string q = "Поиск: " + query;
         int w = gfx::width(gfx::regular, 13, q) + 24;
@@ -2116,6 +2141,15 @@ void App::draw_detail()
         chip(e.region, col::TEXT);
     if (!e.game_version.empty())
         chip("Для версии " + e.game_version, col::TEXT);
+    {
+        datascan::Info di;
+        if (datascan::lookup(e.id, e.data_path, di)) {
+            if (di.has_data)
+                chip("На карте есть data: " + fmt_size(di.data_bytes), col::ACCENT);
+            if (di.has_repatch)
+                chip("На карте есть rePatch: " + fmt_size(di.repatch_bytes), col::ACCENT2);
+        }
+    }
     if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) {
         if (!e.data.empty())
             chip("Data скачается и встанет сама", col::GREEN);
@@ -2350,6 +2384,9 @@ void App::load_prefs()
         p = strstr(s.c_str(), "theme=");
         if (p && sscanf(p, "theme=%d", &v) == 1 && v >= 0 && v < col::THEME_COUNT)
             theme = v;
+        p = strstr(s.c_str(), "vforge=");
+        if (p && sscanf(p, "vforge=%d", &v) == 1)
+            use_vforge = v != 0;
         p = strstr(s.c_str(), "sgdb=");
         if (p) {
             std::string k = p + 5;
@@ -2365,6 +2402,7 @@ void App::load_prefs()
     col::apply_theme(theme);
     scraper::set_key(sgdb_key);
     scraper::set_enabled(scrape_on);
+    scraper::set_vitaforge(use_vforge);
 }
 
 static std::string font_label(int mode)
@@ -2382,7 +2420,7 @@ static std::string font_label(int mode)
 void App::save_prefs()
 {
     fs::write(APP_DIR + "/prefs.txt", "speed=" + std::to_string(speed_mode) + "\nnodata=" + std::to_string(skip_data ? 1 : 0) +
-                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\ntheme=" + std::to_string(theme) + "\nsgdb=" + sgdb_key + "\n");
+                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\ntheme=" + std::to_string(theme) + "\nvforge=" + std::to_string(use_vforge ? 1 : 0) + "\nsgdb=" + sgdb_key + "\n");
 }
 
 void App::apply_speed()
@@ -2919,6 +2957,7 @@ void App::check_reboot()
         }
         if (t->state == TS_DONE && !t->synced) {
             t->synced = true;
+            datascan::rescan();
             daemon_notify("Установлено: " + t->entry.name);
             if (t->entry.cat == CAT_GAMES) {
                 installed.refresh();
@@ -3328,6 +3367,10 @@ void App::draw_settings()
              save_prefs();
              apply_speed();
          }},
+        {"Папки data и rePatch", datascan::scanning() ? "сканирую..." : "найти заново", datascan::scanning() ? col::ORANGE : col::MUTED, [this]() {
+             datascan::rescan();
+             show_toast("Сканирую ux0:data и ux0:rePatch в фоне");
+         }},
         {"Тема", col::theme_name(theme), col::ACCENT, [this]() {
              theme = (theme + 1) % col::THEME_COUNT;
              col::apply_theme(theme);
@@ -3349,6 +3392,13 @@ void App::draw_settings()
              scraper::set_enabled(scrape_on);
              save_prefs();
              show_toast(scrape_on ? "Скрапер включён" : "Скрапер выключен");
+         }},
+        {"Источник VitaForge", use_vforge ? "вкл: обложки по title ID" : "выкл", use_vforge ? col::ACCENT : col::MUTED, [this]() {
+             use_vforge = !use_vforge;
+             scraper::set_vitaforge(use_vforge);
+             scraper::clear_misses();
+             save_prefs();
+             show_toast(use_vforge ? "VitaForge включён" : "VitaForge выключен");
          }},
         {"Ключ SteamGridDB", sgdb_key.empty() ? "не задан (нужен для хоумбрю)" : "задан", sgdb_key.empty() ? col::MUTED : col::ACCENT, [this]() {
              ime_purpose = IME_SGDB;
@@ -3446,7 +3496,60 @@ void App::start_preload()
             screen = SCR_BROWSE;
         return;
     }
-    screen = SCR_PRELOAD;
+    // Предзагрузка идёт в фоне, интерфейс не блокируем
+    pre_bg = true;
+    if (screen == SCR_PRELOAD)
+        screen = SCR_BROWSE;
+}
+
+void App::pre_bg_tick()
+{
+    if (!pre_bg || !pre_checked)
+        return;
+    Preload& p = images.pre;
+    if (p.running != 0)
+        return;
+    pre_bg = false;
+    if (p.failed == 0)
+        fs::write(APP_DIR + "/preload.txt", catalog.media + "|" + catalog.version + "|" + catalog.pack_id);
+    if (screen != SCR_PRELOAD)
+        show_toast(p.failed ? "Обложки: не скачалось " + std::to_string(p.failed.load()) + ", докачаю при следующем запуске" : "Все обложки скачаны");
+}
+
+void App::draw_pre_pill()
+{
+    std::vector<std::string> parts;
+    Preload& p = images.pre;
+    if (pre_bg && p.running != 0) {
+        int stage = p.stage;
+        if (stage == 0)
+            parts.push_back("Обложки: проверяю");
+        else if (stage == 1) {
+            uint64_t d = p.live[0].done, t = p.live[0].total;
+            parts.push_back("Обложки: архив " + std::to_string(t ? (int)(d * 100 / t) : 0) + "%");
+        } else if (stage == 2)
+            parts.push_back("Обложки: оглавление");
+        else
+            parts.push_back("Обложки: " + std::to_string(std::min(p.done.load(), p.total.load())) + "/" + std::to_string(p.total.load()));
+    }
+    if (datascan::scanning()) {
+        int d = 0, t = 0;
+        datascan::progress(d, t);
+        parts.push_back("data/rePatch: " + std::to_string(d) + "/" + std::to_string(t));
+    }
+    int pend = scraper::pending();
+    if (pend)
+        parts.push_back("Поиск медиа: " + std::to_string(pend));
+    if (parts.empty())
+        return;
+    std::string s;
+    for (auto& q : parts)
+        s += (s.empty() ? "" : "  ·  ") + q;
+    int w = gfx::width(gfx::regular, 13, s) + 28;
+    float x = W - 24 - w, y = FOOTER_Y - 34;
+    gfx::rrect(x, y, w, 26, 13, gfx::alpha(col::SURFACE2, 0.95f));
+    gfx::spinner(x + 14, y + 13, 5, col::ACCENT);
+    gfx::text(gfx::regular, x + 24, y + 18, 13, col::TEXT, s);
 }
 
 void App::input_preload()
@@ -3840,6 +3943,7 @@ void App::run()
     }
     images.start();
     scraper::start();
+    datascan::start();
     images.set_media(catalog.media);
     if (pre_checked) {
         std::string mark;
@@ -3883,6 +3987,7 @@ void App::run()
         vita2d_swap_buffers();
         images.tick();
         apply_scraped();
+        pre_bg_tick();
     }
 }
 

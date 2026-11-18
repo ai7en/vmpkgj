@@ -4,7 +4,7 @@
 #include <vector>
 
 // Скрапер обложек и скриншотов. Работает в фоновом потоке, результат забирает главный поток через poll().
-// Источники: libretro-thumbnails (без ключа, только игры Vita), SteamGridDB (нужен API-ключ из настроек).
+// Источники: VitaForge API (по title ID, без ключа), libretro-thumbnails (без ключа, только игры Vita), SteamGridDB (нужен API-ключ из настроек).
 // ScreenScraper не используется: его API требует dev-аккаунт разработчика приложения.
 namespace scraper {
 
@@ -29,6 +29,7 @@ void start();
 void stop();
 void set_key(const std::string& key);
 void set_enabled(bool on);
+void set_vitaforge(bool on); // источник VitaForge (обложки по title ID)
 bool enqueue(const Request& r); // false, если уже в очереди или проверялось
 bool poll(Result& out);
 int pending();

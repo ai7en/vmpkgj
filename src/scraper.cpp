@@ -29,11 +29,13 @@ static std::deque<Result> done;
 static std::set<std::string> seen; // cat|id, уже ставилось в очередь в этом запуске
 static std::string api_key;
 static std::atomic<bool> enabled{true};
+static std::atomic<bool> use_vforge{true};
 static std::atomic<bool> running{false};
 static std::atomic<int> busy{0};
 static SceUID thread_id = -1;
 
 static const char* LIBRETRO = "https://thumbnails.libretro.com/Sony%20-%20PlayStation%20Vita/";
+static const char* VFORGE = "https://vitaforge.josephinoo.dev/api/v1";
 static const char* SGDB = "https://www.steamgriddb.com/api/v2";
 static const long MISS_TTL = 7 * 24 * 3600;
 
@@ -150,16 +152,37 @@ static void from_libretro(const Request& r, Result& res)
         std::string box = std::string(LIBRETRO) + "Named_Boxarts/" + file;
         if (!exists_url(box))
             continue;
-        res.icon = box;
+        if (res.icon.empty())
+            res.icon = box;
         std::string snap = std::string(LIBRETRO) + "Named_Snaps/" + file;
         std::string title = std::string(LIBRETRO) + "Named_Titles/" + file;
-        if (exists_url(snap))
+        if (res.shots.empty() && exists_url(snap))
             res.shots.push_back(snap);
-        if (exists_url(title))
+        if (res.shots.empty() && exists_url(title))
             res.shots.push_back(title);
         res.found = true;
         return;
     }
+}
+
+// VitaForge: картинки по title ID, ключ не нужен. Эндпоинты взяты из исходников josephinoo/vitaForge.
+static void from_vitaforge(const Request& r, Result& res)
+{
+    // title ID у игр и портов вида PCSE00000 / ABCD12345; для остального (id без цифр) не ищем
+    if (r.id.size() != 9 || r.id.find(' ') != std::string::npos)
+        return;
+    if (res.icon.empty()) {
+        std::string u = std::string(VFORGE) + "/images/icon/" + r.id + ".png?size=medium&format=png";
+        if (exists_url(u))
+            res.icon = u;
+    }
+    if (res.shots.empty()) {
+        std::string u = std::string(VFORGE) + "/images/cover/" + r.id + "?size=medium&format=jpeg";
+        if (exists_url(u))
+            res.shots.push_back(u);
+    }
+    if (!res.icon.empty() || !res.shots.empty())
+        res.found = true;
 }
 
 static bool sgdb_json(const std::string& path, Json::Value& root)
@@ -223,9 +246,12 @@ static void process(const Request& r)
         if (!r.manual)
             return; // уже искали и не нашли, повторим через неделю или по ручному запросу
     }
-    if (r.games)
+    if (use_vforge && (res.icon.empty() || res.shots.empty()))
+        from_vitaforge(r, res);
+    if (r.games && (res.icon.empty() || res.shots.empty()))
         from_libretro(r, res);
-    from_sgdb(r, res);
+    if (res.icon.empty() || res.shots.empty())
+        from_sgdb(r, res);
     save_cache(r, res);
     if (res.found) {
         std::lock_guard<Mutex> l(mtx);
@@ -286,6 +312,11 @@ void set_key(const std::string& key)
 void set_enabled(bool on)
 {
     enabled = on;
+}
+
+void set_vitaforge(bool on)
+{
+    use_vforge = on;
 }
 
 bool enqueue(const Request& r)

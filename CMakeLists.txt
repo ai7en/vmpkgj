@@ -26,6 +26,7 @@ add_executable(vpkgj
   src/backup.cpp
   src/bgdl.cpp
   src/catalog.cpp
+  src/datascan.cpp
   src/gfx.cpp
   src/headbin.cpp
   src/images.cpp
