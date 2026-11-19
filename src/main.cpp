@@ -55,15 +55,41 @@ static const int W = 960;
 static const int H = 544;
 static const int HEADER_H = 64;
 static const int FOOTER_Y = 508;
-// карточки игр увеличены на 20% (206x116 -> 247x139); в 960 px влезает 3 колонки вместо 4
-static const int COLS = 3;
-static const int CARD_W = 247;
-static const int CARD_IMG_H = 139;
-static const int CARD_H = 197;
-static const int GAP_X = 28;
-static const int GAP_Y = 20;
-static const int GRID_X = (W - (COLS * CARD_W + (COLS - 1) * GAP_X)) / 2;
+// Раскладка сетки задаётся режимом отображения (Настройки, «Вид карточек») и пересчитывается в apply_layout()
+static int COLS = 3;
+static int CARD_W = 247;
+static int CARD_IMG_H = 139;
+static int CARD_H = 197;
+static int GAP_X = 24;
+static int GAP_Y = 20;
+static int GRID_X = 28;
 static const int GRID_TOP = HEADER_H + 14;
+
+struct LayoutPreset {
+    int cols, rows;
+    const char* name;
+};
+static const LayoutPreset LAYOUTS[] = {
+    {1, 3, "1×3 список"}, {2, 2, "2×2 крупно"}, {3, 2, "3×2"}, {3, 3, "3×3"}, {4, 2, "4×2"}, {4, 3, "4×3"}, {5, 3, "5×3 мелко"},
+};
+static const int LAYOUT_COUNT = 7;
+
+// cols x rows: сколько карточек помещается на экране по ширине и по высоте
+static void apply_layout(int mode)
+{
+    if (mode < 0 || mode >= LAYOUT_COUNT)
+        mode = 2;
+    const LayoutPreset& l = LAYOUTS[mode];
+    COLS = l.cols;
+    GAP_X = l.cols >= 5 ? 10 : l.cols == 4 ? 14 : l.cols == 1 ? 0 : 24;
+    GAP_Y = l.rows >= 3 ? 12 : 20;
+    int avail_w = W - 2 * 28;
+    CARD_W = (avail_w - (COLS - 1) * GAP_X) / COLS;
+    GRID_X = (W - (COLS * CARD_W + (COLS - 1) * GAP_X)) / 2;
+    int view = FOOTER_Y - GRID_TOP - 10;
+    CARD_H = (view - (l.rows - 1) * GAP_Y) / l.rows;
+    CARD_IMG_H = std::max(48, CARD_H - 58);
+}
 static const int TAB_UPDATES = CAT_COUNT;
 static const int TAB_DOWNLOADS = CAT_COUNT + 1;
 static const int TAB_COUNT = CAT_COUNT + 2;
@@ -188,6 +214,7 @@ struct App {
     bool scrape_on = true;     // добирать обложки и скриншоты скрапером
     int font_mode = 3;       // индекс в FONT_SCALES (по умолчанию 1.5)
     int theme = 0;           // col::Theme
+    int layout_mode = 2;     // индекс в LAYOUTS
     bool vforge_cat = true;  // вкладка VitaForge
     bool use_vforge = true;  // VitaForge как источник обложек
     bool pre_bg = false;     // предзагрузка обложек идёт в фоне
@@ -1831,21 +1858,33 @@ void App::draw_card(const Entry& e, float x, float y)
     float ia = a;
     if (!e.shots.empty())
         img = images.get(catalog.media_url(e.shots[0]), &a, IMG_THUMB);
-    if (img) {
+    const bool row = COLS == 1; // режим списка: миниатюра слева, текст справа
+    const int th = CARD_H - 12;
+    const float tx = row ? x + th + 20 : x + 12; // левый край текста
+    if (row) {
+        gfx::placeholder_round(x + 6, y + 6, th, th, 10, e.name, 0);
+        if (icon)
+            gfx::fit_round(icon, x + 6, y + 6, th, th, 10, ia);
+        else if (img)
+            gfx::cover_round(img, x + 6, y + 6, th, th, 10, true, true, a);
+    } else if (img) {
         if (a < 1)
             gfx::placeholder_round(x, y, CARD_W, CARD_IMG_H, 14, e.name, 34);
         gfx::cover_round(img, x, y, CARD_W, CARD_IMG_H, 14, true, false, a);
-        if (icon) {
-            gfx::rrect(x + 9, y + CARD_IMG_H - 59, 54, 54, 10, gfx::alpha(col::BG, 0.65f * ia));
-            gfx::fit_round(icon, x + 12, y + CARD_IMG_H - 56, 48, 48, 8, ia);
+        int ic = std::min(54, CARD_IMG_H - 22);
+        if (icon && ic >= 24) {
+            gfx::rrect(x + 9, y + CARD_IMG_H - ic - 5, ic, ic, 10, gfx::alpha(col::BG, 0.65f * ia));
+            gfx::fit_round(icon, x + 12, y + CARD_IMG_H - ic - 2, ic - 6, ic - 6, 8, ia);
         }
     } else if (icon) {
         gfx::placeholder_round(x, y, CARD_W, CARD_IMG_H, 14, e.name, 0);
-        gfx::fit_round(icon, x + CARD_W / 2 - 60, y + 7, 120, CARD_IMG_H - 14, 6, ia);
+        int iw = std::min(120, CARD_W - 40);
+        gfx::fit_round(icon, x + CARD_W / 2 - iw / 2, y + 7, iw, CARD_IMG_H - 14, 6, ia);
     } else {
         gfx::placeholder_round(x, y, CARD_W, CARD_IMG_H, 14, e.name, 34);
     }
-    gfx::rect(x, y + CARD_IMG_H - 1, CARD_W, 1, col::LINE);
+    if (!row)
+        gfx::rect(x, y + CARD_IMG_H - 1, CARD_W, 1, col::LINE);
 
     float bx = x + CARD_W - 8;
     auto t = tasks.find(e);
@@ -1863,22 +1902,23 @@ void App::draw_card(const Entry& e, float x, float y)
     } else if (e.cat == CAT_TRANSLATIONS && fs_app(e.id)) {
         draw_badge(bx, y + 8, "Игра есть", col::ACCENT2, col::BG);
     }
-    float lx = x + 8;
+    float lx = row ? tx : x + 8;
+    float ly = row ? y + CARD_H - 30 : y + 8;
     if (!e.lang.empty()) {
         std::string l = e.lang;
         for (auto& c : l)
             c = toupper(c);
         int w = gfx::width(gfx::bold, 11, l) + 14;
-        gfx::rrect(lx, y + 8, w, 20, 10, gfx::alpha(col::BG, 0.75f));
-        gfx::text(gfx::bold, lx + 7, y + 22, 11, col::TEXT, l);
+        gfx::rrect(lx, ly, w, 20, 10, gfx::alpha(col::BG, 0.75f));
+        gfx::text(gfx::bold, lx + 7, ly + 14, 11, col::TEXT, l);
         lx += w + 4;
     }
     if (e.cat == CAT_PORTS) {
         std::string l = e.data.empty() ? (e.data_path.empty() ? "" : "СВОИ ФАЙЛЫ") : "DATA";
         if (!l.empty()) {
             int w = gfx::width(gfx::bold, 11, l) + 14;
-            gfx::rrect(lx, y + 8, w, 20, 10, e.data.empty() ? gfx::alpha(col::BG, 0.75f) : col::GREEN);
-            gfx::text(gfx::bold, lx + 7, y + 22, 11, e.data.empty() ? col::ORANGE : col::BG, l);
+            gfx::rrect(lx, ly, w, 20, 10, e.data.empty() ? gfx::alpha(col::BG, 0.75f) : col::GREEN);
+            gfx::text(gfx::bold, lx + 7, ly + 14, 11, e.data.empty() ? col::ORANGE : col::BG, l);
         }
     }
 
@@ -1889,19 +1929,22 @@ void App::draw_card(const Entry& e, float x, float y)
             if (di.has_repatch) {
                 int w = gfx::width(gfx::bold, 11, "rePatch") + 14;
                 cx -= w;
-                gfx::rrect(cx, y + CARD_IMG_H - 28, w, 20, 10, col::ACCENT2);
-                gfx::text(gfx::bold, cx + 7, y + CARD_IMG_H - 14, 11, col::ON_ACCENT, "rePatch");
+                gfx::rrect(cx, row ? y + CARD_H - 30 : y + CARD_IMG_H - 28, w, 20, 10, col::ACCENT2);
+                gfx::text(gfx::bold, cx + 7, row ? y + CARD_H - 16 : y + CARD_IMG_H - 14, 11, col::ON_ACCENT, "rePatch");
                 cx -= 4;
             }
             if (di.has_data) {
                 int w = gfx::width(gfx::bold, 11, "data") + 14;
                 cx -= w;
-                gfx::rrect(cx, y + CARD_IMG_H - 28, w, 20, 10, col::ACCENT);
-                gfx::text(gfx::bold, cx + 7, y + CARD_IMG_H - 14, 11, col::ON_ACCENT, "data");
+                gfx::rrect(cx, row ? y + CARD_H - 30 : y + CARD_IMG_H - 28, w, 20, 10, col::ACCENT);
+                gfx::text(gfx::bold, cx + 7, row ? y + CARD_H - 16 : y + CARD_IMG_H - 14, 11, col::ON_ACCENT, "data");
             }
         }
     }
-    gfx::text(gfx::bold, x + 12, y + CARD_IMG_H + 26, 15, col::TEXT, gfx::ellipsize(gfx::bold, 15, e.name, CARD_W - 24));
+    const float ny = row ? y + 34 : y + CARD_IMG_H + 26;
+    const float sy2 = row ? y + 60 : y + CARD_IMG_H + 48;
+    const int tw_max = (int)(x + CARD_W - 12 - tx);
+    gfx::text(gfx::bold, tx, ny, 15, col::TEXT, gfx::ellipsize(gfx::bold, 15, e.name, row ? tw_max - 130 : tw_max));
     std::string sub;
     if (e.cat == CAT_GAMES)
         sub = e.region.empty() ? e.id : e.region + " · " + e.id;
@@ -1909,8 +1952,8 @@ void App::draw_card(const Entry& e, float x, float y)
         sub = e.author.empty() ? e.version : e.version.empty() ? e.author : e.author + " · " + e.version;
     std::string size = e.size ? fmt_size(e.size) : "";
     int sw = gfx::width(gfx::regular, 12, size);
-    gfx::text(gfx::regular, x + 12, y + CARD_IMG_H + 48, 12, col::MUTED, gfx::ellipsize(gfx::regular, 12, sub, CARD_W - 32 - sw));
-    gfx::text_right(gfx::regular, x + CARD_W - 12, y + CARD_IMG_H + 48, 12, col::MUTED, size);
+    gfx::text(gfx::regular, tx, sy2, 12, col::MUTED, gfx::ellipsize(gfx::regular, 12, sub, tw_max - 20 - sw));
+    gfx::text_right(gfx::regular, x + CARD_W - 12, sy2, 12, col::MUTED, size);
 
     if (t && t->state == TS_RUNNING && t->progress.total) {
         float f = (float)t->progress.done / t->progress.total;
@@ -2406,6 +2449,9 @@ void App::load_prefs()
         p = strstr(s.c_str(), "scraper=");
         if (p && sscanf(p, "scraper=%d", &v) == 1)
             scrape_on = v != 0;
+        p = strstr(s.c_str(), "layout=");
+        if (p && sscanf(p, "layout=%d", &v) == 1 && v >= 0 && v < LAYOUT_COUNT)
+            layout_mode = v;
         p = strstr(s.c_str(), "theme=");
         if (p && sscanf(p, "theme=%d", &v) == 1 && v >= 0 && v < col::THEME_COUNT)
             theme = v;
@@ -2432,6 +2478,7 @@ void App::load_prefs()
     scraper::set_enabled(scrape_on);
     scraper::set_vitaforge(use_vforge);
     vitaforge::set_enabled(vforge_cat);
+    apply_layout(layout_mode);
 }
 
 static std::string font_label(int mode)
@@ -2449,7 +2496,7 @@ static std::string font_label(int mode)
 void App::save_prefs()
 {
     fs::write(APP_DIR + "/prefs.txt", "speed=" + std::to_string(speed_mode) + "\nnodata=" + std::to_string(skip_data ? 1 : 0) +
-                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\ntheme=" + std::to_string(theme) + "\nvfcat=" + std::to_string(vforge_cat ? 1 : 0) + "\nvforge=" + std::to_string(use_vforge ? 1 : 0) + "\nsgdb=" + sgdb_key + "\n");
+                                          "\nfont=" + std::to_string(font_mode) + "\nscraper=" + std::to_string(scrape_on ? 1 : 0) + "\nlayout=" + std::to_string(layout_mode) + "\ntheme=" + std::to_string(theme) + "\nvfcat=" + std::to_string(vforge_cat ? 1 : 0) + "\nvforge=" + std::to_string(use_vforge ? 1 : 0) + "\nsgdb=" + sgdb_key + "\n");
 }
 
 void App::apply_speed()
@@ -3404,6 +3451,14 @@ void App::draw_settings()
              theme = (theme + 1) % col::THEME_COUNT;
              col::apply_theme(theme);
              save_prefs();
+         }},
+        {"Вид карточек", std::string("‹ ") + LAYOUTS[layout_mode].name + " ›", col::ACCENT, [this]() {
+             layout_mode = (layout_mode + 1) % LAYOUT_COUNT;
+             apply_layout(layout_mode);
+             save_prefs();
+             focus_init = false;
+             ensure_visible();
+             show_toast(std::string("Вид: ") + LAYOUTS[layout_mode].name);
          }},
         {"Размер шрифта", "‹ x" + font_label(font_mode) + " ›", font_mode == 3 ? col::MUTED : col::ACCENT, [this]() {
              font_mode = (font_mode + 1) % FONT_SCALE_COUNT;
