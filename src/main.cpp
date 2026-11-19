@@ -188,7 +188,7 @@ struct App {
     bool scrape_on = true;     // добирать обложки и скриншоты скрапером
     int font_mode = 3;       // индекс в FONT_SCALES (по умолчанию 1.5)
     int theme = 0;           // col::Theme
-    bool vforge_cat = false; // каталог VitaForge в хоумбрю/портах
+    bool vforge_cat = true;  // вкладка VitaForge
     bool use_vforge = true;  // VitaForge как источник обложек
     bool pre_bg = false;     // предзагрузка обложек идёт в фоне
     void draw_pre_pill();
@@ -311,7 +311,7 @@ struct App {
 
 static bool launchable(const Entry& e)
 {
-    return e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_ANDROID || (e.cat == CAT_GAMES && !e.dlc);
+    return e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE || e.cat == CAT_ANDROID || (e.cat == CAT_GAMES && !e.dlc);
 }
 
 static uint32_t read_buttons()
@@ -358,6 +358,7 @@ static const std::vector<int>& sorts_for(int c)
         {S_CATALOG, S_NAME, S_GAME, S_NEW, S_BIG, S_SMALL},
         {S_CATALOG, S_NAME, S_AUTHOR, S_NEW, S_BIG, S_SMALL},
         {S_CATALOG, S_NAME, S_SECTION, S_AUTHOR},
+        {S_CATALOG, S_NAME, S_AUTHOR, S_NEW, S_BIG, S_SMALL},
         {S_CATALOG, S_NAME, S_AUTHOR, S_NEW, S_BIG, S_SMALL},
     };
     return v[c];
@@ -674,7 +675,7 @@ void App::ignore(const Entry& e, const std::string& version)
 std::vector<Entry> App::collect_alt()
 {
     std::vector<Entry> out;
-    for (int c : {CAT_PORTS, CAT_HOMEBREW}) {
+    for (int c : {CAT_PORTS, CAT_HOMEBREW, CAT_VITAFORGE}) {
         for (auto& e : catalog.items[c]) {
             if (e.alt_url.empty() || e.alt_version.empty() || installed.status(e) == ST_NONE)
                 continue;
@@ -1231,6 +1232,7 @@ void App::ask_install(const Entry& e, bool reinstall)
     switch (e.cat) {
     case CAT_PORTS:
     case CAT_HOMEBREW:
+    case CAT_VITAFORGE:
         if (e.data.empty())
             modal.lines.push_back("Будет установлен vpk, data не требуется");
         else if (is_update_of(e) && data_installed(e, false))
@@ -1287,7 +1289,7 @@ void App::ask_install(const Entry& e, bool reinstall)
             need_shaccg = true;
     modal.yes = reinstall ? "Переустановить" : "Установить";
     Entry copy = e;
-    bool has_data = (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) && !e.data.empty() && !is_update_of(e);
+    bool has_data = (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE) && !e.data.empty() && !is_update_of(e);
     if (has_data && skip_data) {
         copy.data.clear();
         modal.lines.push_back("Включено «без data»: поставится только vpk");
@@ -1777,17 +1779,32 @@ void App::draw_header()
     float x = 74;
     gfx::button(BTN_L, x, 23, 20);
     x += 34;
-    for (int t = 0; t < TAB_COUNT; t++) {
+    // Вкладок много, а шрифт крупный: подбираем размер так, чтобы все влезли в шапку
+    auto tab_label = [&](int t) {
         std::string label = t == TAB_DOWNLOADS ? "Загрузки" : t == TAB_UPDATES ? "Обновления" : category_title((Category)t);
         if (!query.empty() && t < CAT_COUNT)
             label += " " + std::to_string(filtered[t].size());
-        int n = t == TAB_DOWNLOADS ? tasks.active() + (int)bg_items.size() : t == TAB_UPDATES ? updates_count : 0;
-        int tw = gfx::width(gfx::bold, 15, label);
+        return label;
+    };
+    auto tab_count = [&](int t) { return t == TAB_DOWNLOADS ? tasks.active() + (int)bg_items.size() : t == TAB_UPDATES ? updates_count : 0; };
+    int tfs = 15;
+    float avail = W - x - 56;
+    for (; tfs > 9; tfs--) {
+        float total = 0;
+        for (int t = 0; t < TAB_COUNT; t++)
+            total += gfx::width(gfx::bold, tfs, tab_label(t)) + 22 + (tab_count(t) ? 26 : 0) + 2;
+        if (total <= avail)
+            break;
+    }
+    for (int t = 0; t < TAB_COUNT; t++) {
+        std::string label = tab_label(t);
+        int n = tab_count(t);
+        int tw = gfx::width(gfx::bold, tfs, label);
         float w = tw + 22 + (n ? 26 : 0);
         bool on = t == tab;
         if (on)
             gfx::rrect(x, 16, w, 34, 17, col::ACCENT);
-        gfx::text(on ? gfx::bold : gfx::regular, x + 11, 38, 15, on ? col::ON_ACCENT : col::MUTED, label);
+        gfx::text(on ? gfx::bold : gfx::regular, x + 11, 38, tfs, on ? col::ON_ACCENT : col::MUTED, label);
         if (n) {
             std::string c = std::to_string(n);
             gfx::circle(x + w - 22, 33, 9, on ? col::ON_ACCENT : col::ACCENT);
@@ -1865,7 +1882,7 @@ void App::draw_card(const Entry& e, float x, float y)
         }
     }
 
-    if (e.cat == CAT_GAMES || e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) {
+    if (e.cat == CAT_GAMES || e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE) {
         datascan::Info di;
         if (datascan::lookup(e.id, e.data_path, di)) {
             float cx = x + CARD_W - 8;
@@ -2158,7 +2175,7 @@ void App::draw_detail()
                 chip("На карте есть rePatch: " + fmt_size(di.repatch_bytes), col::ACCENT2);
         }
     }
-    if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) {
+    if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE) {
         if (!e.data.empty())
             chip("Data скачается и встанет сама", col::GREEN);
         else if (!e.data_path.empty())
@@ -2705,7 +2722,7 @@ void App::queue_background(const Entry& e)
             urls.push_back(first_link(part));
     } else {
         urls.push_back(first_link(e.url));
-        if ((e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) && !is_update_of(e) && !skip_data)
+        if ((e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE) && !is_update_of(e) && !skip_data)
             for (auto& part : split_by(e.data, ';')) {
                 std::string src = part;
                 size_t gt = src.find('>');
@@ -3405,11 +3422,11 @@ void App::draw_settings()
              save_prefs();
              show_toast(scrape_on ? "Скрапер включён" : "Скрапер выключен");
          }},
-        {"Каталог VitaForge", vforge_cat ? "вкл: хоумбрю и порты" : "выкл", vforge_cat ? col::ACCENT : col::MUTED, [this]() {
+        {"Вкладка VitaForge", vforge_cat ? "вкл" : "выкл", vforge_cat ? col::ACCENT : col::MUTED, [this]() {
              vforge_cat = !vforge_cat;
              vitaforge::set_enabled(vforge_cat);
              save_prefs();
-             show_toast(vforge_cat ? "Загружаю каталог VitaForge" : "Каталог VitaForge выключен");
+             show_toast(vforge_cat ? "Загружаю каталог VitaForge" : "Вкладка VitaForge очищена");
              start_refresh(true);
          }},
         {"Источник VitaForge", use_vforge ? "вкл: обложки по title ID" : "выкл", use_vforge ? col::ACCENT : col::MUTED, [this]() {

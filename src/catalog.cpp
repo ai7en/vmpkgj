@@ -15,13 +15,13 @@
 
 const char* category_key(Category c)
 {
-    static const char* keys[] = {"games", "ports", "translations", "homebrew", "plugins", "android"};
+    static const char* keys[] = {"games", "ports", "translations", "homebrew", "plugins", "android", "vitaforge"};
     return keys[c];
 }
 
 const char* category_title(Category c)
 {
-    static const char* titles[] = {"Игры", "Порты", "Переводы", "Хоумбрю", "Плагины", "Android"};
+    static const char* titles[] = {"Игры", "Порты", "Переводы", "Хоумбрю", "Плагины", "Android", "VitaForge"};
     return titles[c];
 }
 
@@ -128,7 +128,7 @@ bool Catalog::parse(const std::string& json, std::string& err)
             e.game_version = str(v, "game_version");
             e.install = str(v, "install");
             e.tai_section = str(v, "tai_section");
-            e.url = c == CAT_PORTS || c == CAT_HOMEBREW ? str(v, "vpk") : c == CAT_GAMES ? str(v, "pkg") : c == CAT_ANDROID ? str(v, "apk") : str(v, "url");
+            e.url = c == CAT_PORTS || c == CAT_HOMEBREW || c == CAT_VITAFORGE ? str(v, "vpk") : c == CAT_GAMES ? str(v, "pkg") : c == CAT_ANDROID ? str(v, "apk") : str(v, "url");
             e.profile = str(v, "profile");
             e.data = str(v, "data");
             e.data_path = str(v, "data_path");
@@ -430,7 +430,7 @@ void Catalog::apply_scraper()
                     e.icon = fill_id(icon_tpl, e.id);
                 if (e.shots.empty() && !shot_tpl.empty())
                     e.shots.push_back(fill_id(shot_tpl, e.id));
-            } else if (c == CAT_PORTS || c == CAT_HOMEBREW || c == CAT_PLUGINS) {
+            } else if (c == CAT_PORTS || c == CAT_HOMEBREW || c == CAT_PLUGINS || c == CAT_VITAFORGE) {
                 if (e.icon.empty()) {
                     std::string repo = github_repo(e.url);
                     if (!repo.empty())
@@ -639,7 +639,7 @@ Status Installed::status(const Entry& e)
         std::string p = e.content.size() >= 36 ? "ux0:addcont/" + e.id + "/" + e.content.substr(20, 16) : "";
         return !p.empty() && app_exists("dlc:" + p) ? ST_INSTALLED : ST_NONE;
     }
-    if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_GAMES || e.cat == CAT_ANDROID) {
+    if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE || e.cat == CAT_GAMES || e.cat == CAT_ANDROID) {
         if (!app_exists(e.id))
             return ST_NONE;
         if (e.cat == CAT_GAMES)

@@ -921,7 +921,7 @@ void Tasks::run(Task& t)
             if (urls.empty())
                 err = "Нет ссылки на PKG";
         }
-    } else if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW) {
+    } else if (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE) {
         std::string was = installed->version_of(e);
         bool skip_data = false;
         if (!e.data.empty() && !was.empty() && was != (e.version.empty() ? "-" : e.version)) {

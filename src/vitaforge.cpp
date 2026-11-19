@@ -85,7 +85,7 @@ static bool convert(const Json::Value& v, Json::Value& out)
     std::string name = trim(str(v, "name"));
     if (name.empty())
         return false;
-    out["c"] = (category == "port" || category == "ports") ? (int)CAT_PORTS : (int)CAT_HOMEBREW;
+    out["k"] = (category == "port" || category == "ports") ? "Порт" : "Хоумбрю";
     out["id"] = id;
     out["name"] = name;
     std::string ver = trim(str(v, "version"));
@@ -214,9 +214,10 @@ bool refresh(bool force, std::string& err)
 
 }
 
-// Добавляет записи VitaForge в каталог. Записи с title ID, который уже есть в хоумбрю/портах, пропускаются.
+// Заполняет вкладку VitaForge из кэша.
 void Catalog::load_vitaforge()
 {
+    items[CAT_VITAFORGE].clear();
     if (!vitaforge::enabled())
         return;
     std::string s;
@@ -230,15 +231,9 @@ void Catalog::load_vitaforge()
         return;
     s.clear();
     std::set<std::string> have;
-    for (int c : {(int)CAT_PORTS, (int)CAT_HOMEBREW})
-        for (auto& e : items[c])
-            have.insert(lower(e.id));
     for (const auto& v : root["items"]) {
-        int c = v["c"].asInt();
-        if (c != CAT_PORTS && c != CAT_HOMEBREW)
-            continue;
         Entry e;
-        e.cat = (Category)c;
+        e.cat = CAT_VITAFORGE;
         e.id = v["id"].asString();
         if (have.count(lower(e.id)))
             continue;
@@ -250,6 +245,7 @@ void Catalog::load_vitaforge()
         if (!e.description.empty())
             e.description += "\n\n";
         e.description += "Каталог: VitaForge";
+        e.lang = v["k"].asString(); // тип записи показывается чипом
         e.url = v["url"].asString();
         e.data = v["data"].asString();
         e.data_path = v["data_path"].asString();
@@ -261,6 +257,6 @@ void Catalog::load_vitaforge()
         e.date = v["date"].asString();
         e.search = lower(e.name + " " + e.id + " " + e.author);
         e.sort_name = lower(e.name);
-        items[c].push_back(std::move(e));
+        items[CAT_VITAFORGE].push_back(std::move(e));
     }
 }

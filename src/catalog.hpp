@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-enum Category { CAT_GAMES, CAT_PORTS, CAT_TRANSLATIONS, CAT_HOMEBREW, CAT_PLUGINS, CAT_ANDROID, CAT_COUNT };
+enum Category { CAT_GAMES, CAT_PORTS, CAT_TRANSLATIONS, CAT_HOMEBREW, CAT_PLUGINS, CAT_ANDROID, CAT_VITAFORGE, CAT_COUNT };
 
 struct Entry {
     Category cat;
