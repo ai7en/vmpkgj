@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <ctime>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -33,6 +34,8 @@ static std::atomic<bool> use_vforge{true};
 static std::atomic<bool> running{false};
 static std::atomic<int> busy{0};
 static SceUID thread_id = -1;
+static std::function<bool()> busy_check; // true: идёт установка, скрапер ждёт
+static std::atomic<int> pre_running{0};
 
 static const char* LIBRETRO = "https://thumbnails.libretro.com/Sony%20-%20PlayStation%20Vita/";
 static const char* VFORGE = "https://vitaforge.josephinoo.dev/api/v1";
@@ -261,6 +264,7 @@ static void process(const Request& r)
 
 static int worker(SceSize, void*)
 {
+    sceKernelDelayThread(6 * 1000 * 1000); // даём интерфейсу и каталогу подняться, поиск медиа не горит
     while (running) {
         Request r;
         bool have = false;
@@ -276,10 +280,13 @@ static int worker(SceSize, void*)
             sceKernelDelayThread(300 * 1000);
             continue;
         }
+        // установка важнее картинок: пока качается пакет, возвращаем запрос в очередь и ждём
+        while (running && busy_check && busy_check())
+            sceKernelDelayThread(1000 * 1000);
         busy = 1;
         process(r);
         busy = 0;
-        sceKernelDelayThread(150 * 1000);
+        sceKernelDelayThread(pre_running ? 600 * 1000 : 150 * 1000); // пока идёт предзагрузка, не давим на сеть
     }
     return 0;
 }
@@ -307,6 +314,16 @@ void set_key(const std::string& key)
 {
     std::lock_guard<Mutex> l(mtx);
     api_key = trim(key);
+}
+
+void set_busy_check(std::function<bool()> f)
+{
+    busy_check = std::move(f);
+}
+
+void set_preload_running(bool on)
+{
+    pre_running = on ? 1 : 0;
 }
 
 void set_enabled(bool on)

@@ -371,10 +371,10 @@ void App::show_toast(const std::string& s)
 }
 
 enum SortKind { S_CATALOG, S_NAME, S_NEW, S_BIG, S_SMALL, S_REGION, S_AUTHOR, S_GAME, S_SECTION };
-enum FilterKind { F_REGION, F_RU, F_INSTALLED, F_UPDATES, F_HIDE_DLC, F_ONLY_DLC, F_DATA, F_OWN_FILES, F_GAME_HERE, F_COUNT };
+enum FilterKind { F_REGION, F_RU, F_INSTALLED, F_UPDATES, F_HIDE_DLC, F_ONLY_DLC, F_DATA, F_OWN_FILES, F_GAME_HERE, F_DATA_HERE, F_REPATCH_HERE, F_COUNT };
 
 static const char* SORT_NAMES[] = {"Как в каталоге", "По названию", "Сначала новые", "Сначала большие", "Сначала маленькие", "По региону", "По автору", "По игре", "По разделу"};
-static const char* FILTER_NAMES[] = {"Регион", "Есть русский язык", "Только установленные", "Только с обновлением", "Скрыть DLC", "Только DLC", "Data скачается сама", "Нужны свои файлы", "Игра есть на консоли"};
+static const char* FILTER_NAMES[] = {"Регион", "Есть русский язык", "Только установленные", "Только с обновлением", "Скрыть DLC", "Только DLC", "Data скачается сама", "Нужны свои файлы", "Игра есть на консоли", "data есть на карте", "rePatch есть на карте"};
 static const char* REGION_NAMES[] = {"Все", "EU", "US", "JP", "ASIA"};
 
 static const std::vector<int>& sorts_for(int c)
@@ -394,8 +394,8 @@ static const std::vector<int>& sorts_for(int c)
 static const std::vector<int>& filters_for(int c)
 {
     static const std::vector<int> v[CAT_COUNT] = {
-        {F_REGION, F_RU, F_INSTALLED, F_UPDATES, F_HIDE_DLC, F_ONLY_DLC},
-        {F_DATA, F_OWN_FILES, F_RU, F_INSTALLED, F_UPDATES},
+        {F_REGION, F_RU, F_INSTALLED, F_UPDATES, F_HIDE_DLC, F_ONLY_DLC, F_DATA_HERE, F_REPATCH_HERE},
+        {F_DATA, F_OWN_FILES, F_RU, F_INSTALLED, F_UPDATES, F_DATA_HERE, F_REPATCH_HERE},
         {F_GAME_HERE, F_INSTALLED, F_UPDATES},
         {F_RU, F_INSTALLED, F_UPDATES},
         {F_INSTALLED, F_UPDATES},
@@ -478,6 +478,14 @@ void App::rebuild_cat(int c)
             continue;
         if (v.flag[F_GAME_HERE] && !fs_app(e.id))
             continue;
+        if (v.flag[F_DATA_HERE] || v.flag[F_REPATCH_HERE]) {
+            datascan::Info di;
+            datascan::lookup(e.id, e.data_path, di);
+            if (v.flag[F_DATA_HERE] && !di.has_data)
+                continue;
+            if (v.flag[F_REPATCH_HERE] && !di.has_repatch)
+                continue;
+        }
         if (need_status) {
             Status st = status_of(e);
             if (v.flag[F_INSTALLED] && st == ST_NONE)
@@ -1317,9 +1325,21 @@ void App::ask_install(const Entry& e, bool reinstall)
     modal.yes = reinstall ? "Переустановить" : "Установить";
     Entry copy = e;
     bool has_data = (e.cat == CAT_PORTS || e.cat == CAT_HOMEBREW || e.cat == CAT_VITAFORGE) && !e.data.empty() && !is_update_of(e);
+    datascan::Info di;
+    bool data_here = has_data && datascan::lookup(e.id, e.data_path, di) && di.has_data;
     if (has_data && skip_data) {
         copy.data.clear();
         modal.lines.push_back("Включено «без data»: поставится только vpk");
+    } else if (data_here) {
+        // data уже лежит на карте: по умолчанию ставим только vpk, а перекачку data оставляем запасной кнопкой
+        copy.data.clear();
+        modal.lines.push_back("Data уже на карте (" + fmt_size(di.data_bytes) + "): поставлю только vpk");
+        Entry full = e;
+        modal.alt = "С data";
+        modal.alt_action = [this, full, deps]() {
+            tasks.add(full, deps);
+            show_toast("Добавлено в загрузки с data");
+        };
     }
     modal.action = [this, copy, deps]() {
         tasks.add(copy, deps);
@@ -1330,7 +1350,7 @@ void App::ask_install(const Entry& e, bool reinstall)
         modal.alt = "Сначала libshacccg";
         modal.alt_action = [this]() { shaccg_ask(); };
     }
-    if (has_data && !skip_data && modal.alt.empty()) {
+    if (has_data && !skip_data && !data_here && modal.alt.empty()) {
         Entry nodata = e;
         nodata.data.clear();
         modal.lines.push_back("Можно поставить без data (только vpk), если она уже лежит на карте");
@@ -4034,6 +4054,7 @@ void App::run()
         }
     }
     images.start();
+    scraper::set_busy_check([this]() { return tasks.active() > 0; });
     scraper::start();
     datascan::start();
     images.set_media(catalog.media);
@@ -4080,6 +4101,21 @@ void App::run()
         images.tick();
         apply_scraped();
         pre_bg_tick();
+        scraper::set_preload_running(images.pre.running != 0);
+        {
+            static bool was_scanning = false;
+            bool now = datascan::scanning();
+            if (was_scanning && !now) {
+                bool need = false;
+                for (int c = 0; c < CAT_COUNT; c++)
+                    if (views[c].flag[F_DATA_HERE] || views[c].flag[F_REPATCH_HERE]) {
+                        rebuild_cat(c);
+                        need = true;
+                    }
+                (void)need;
+            }
+            was_scanning = now;
+        }
     }
 }
 

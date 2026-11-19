@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,8 @@ void start();
 void stop();
 void set_key(const std::string& key);
 void set_enabled(bool on);
+void set_busy_check(std::function<bool()> f); // «ждать», пока возвращает true (идёт установка)
+void set_preload_running(bool on);
 void set_vitaforge(bool on); // источник VitaForge (обложки по title ID)
 bool enqueue(const Request& r); // false, если уже в очереди или проверялось
 bool poll(Result& out);
